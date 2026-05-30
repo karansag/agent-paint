@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Paint</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>Agent Paint</span>
+        </div>
+        <div class="file-actions" aria-label="File actions">
+          <button id="undoBtn" type="button" title="Undo">Undo</button>
+          <button id="clearBtn" type="button" title="Clear canvas">Clear</button>
+          <button id="exportBtn" type="button" title="Export PNG">Export</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="toolbar" aria-label="Paint tools">
+          <div class="tool-group" role="group" aria-label="Drawing tools">
+            <button class="tool-button active" type="button" data-tool="pencil" title="Pencil">Pencil</button>
+            <button class="tool-button" type="button" data-tool="line" title="Line">Line</button>
+            <button class="tool-button" type="button" data-tool="rect" title="Rectangle">Rect</button>
+            <button class="tool-button" type="button" data-tool="ellipse" title="Ellipse">Ellipse</button>
+            <button class="tool-button" type="button" data-tool="fill" title="Fill">Fill</button>
+            <button class="tool-button" type="button" data-tool="text" title="Text">Text</button>
+            <button class="tool-button" type="button" data-tool="eraser" title="Eraser">Eraser</button>
+          </div>
+
+          <div class="tool-group">
+            <label class="control-label" for="colorInput">Color</label>
+            <input id="colorInput" type="color" value="#1f2937" />
+            <div id="swatches" class="swatches" aria-label="Color swatches"></div>
+          </div>
+
+          <div class="tool-group">
+            <label class="control-label" for="brushSize">Brush</label>
+            <input id="brushSize" type="range" min="1" max="48" value="4" />
+            <output id="brushOutput" for="brushSize">4 px</output>
+          </div>
+        </aside>
+
+        <section class="canvas-stage" aria-label="Canvas workspace">
+          <div class="canvas-frame">
+            <canvas id="paintCanvas" width="768" height="512"></canvas>
+            <canvas id="previewCanvas" width="768" height="512"></canvas>
+          </div>
+          <div class="status-row">
+            <span id="cursorStatus">768 x 512</span>
+            <span id="agentStatus">Idle</span>
+          </div>
+        </section>
+
+        <aside class="agent-panel" aria-label="Agent controls">
+          <section class="panel-section">
+            <h1>Agent</h1>
+            <label class="field">
+              <span>llama-server</span>
+              <input id="llamaUrl" type="url" spellcheck="false" />
+            </label>
+            <label class="field compact">
+              <span>chat path</span>
+              <input id="chatPath" type="text" spellcheck="false" />
+            </label>
+            <label class="field compact">
+              <span>model</span>
+              <input id="modelName" type="text" spellcheck="false" />
+            </label>
+          </section>
+
+          <section class="panel-section">
+            <label class="field">
+              <span>Prompt</span>
+              <textarea id="agentPrompt" rows="4" placeholder="Blank means the agent chooses what to draw."></textarea>
+            </label>
+            <label class="field">
+              <span>Reference image</span>
+              <input id="referenceInput" type="file" accept="image/*" />
+            </label>
+            <div id="referencePreview" class="reference-preview" aria-live="polite"></div>
+          </section>
+
+          <section class="panel-section options">
+            <label>
+              <input id="autoLoop" type="checkbox" checked />
+              Auto feedback loop
+            </label>
+            <label>
+              <input id="useVision" type="checkbox" />
+              Send screenshots to model
+            </label>
+            <label class="field compact">
+              <span>turn limit</span>
+              <input id="maxTurns" type="number" min="1" max="40" value="12" />
+            </label>
+            <label class="field compact">
+              <span>creativity</span>
+              <input id="creativityInput" type="range" min="0" max="100" value="82" />
+              <output id="creativityOutput" for="creativityInput">82</output>
+            </label>
+          </section>
+
+          <section class="agent-actions" aria-label="Agent actions">
+            <button id="startAgentBtn" class="primary" type="button">Send</button>
+            <button id="newAgentBtn" type="button">New</button>
+            <button id="stepAgentBtn" type="button">Step</button>
+            <button id="stopAgentBtn" type="button">Stop</button>
+          </section>
+
+          <section class="panel-section log-section">
+            <h2>Stream</h2>
+            <div id="eventLog" class="event-log" aria-live="polite"></div>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
