@@ -77,7 +77,6 @@ const GENERIC_CHAT_PATH_ENV =
   process.env.LLAMA_CHAT_PATH ||
   "";
 const DEFAULT_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS || process.env.LLAMA_MAX_TOKENS || 1400);
-const MAX_HISTORY_MESSAGES = 15;
 const STARTUP_PROVIDER_CONFIG = await resolveStartupProviderConfig();
 const DEFAULT_PROVIDER = STARTUP_PROVIDER_CONFIG.provider;
 const DEFAULT_API_BASE_URL = STARTUP_PROVIDER_CONFIG.apiBaseUrl;
@@ -311,10 +310,10 @@ async function runModelTurn(ws, session, payload) {
   }
 
   const userMessage = buildUserMessage(effectivePayload, session);
-  session.messages.push(userMessage);
-  trimConversation(session);
-
-  const requestBody = buildChatCompletionRequest(config, session.messages);
+  const requestBody = buildChatCompletionRequest(config, [
+    session.messages[0],
+    userMessage,
+  ]);
   const requestUsesVision = Boolean(
     effectivePayload.useVision &&
       (effectivePayload.canvas?.image || effectivePayload.reference?.image),
@@ -379,8 +378,6 @@ async function runModelTurn(ws, session, payload) {
 
     extractor.flush();
     session.lastAssistantText = truncate(assistantText, 5000);
-    session.messages.push({ role: "assistant", content: session.lastAssistantText });
-    trimConversation(session);
 
     send(ws, "modelDone", {
       turn: session.turn,
@@ -411,8 +408,10 @@ async function runModelTurn(ws, session, payload) {
 
       try {
         const fallbackPayload = stripImagesFromPayload(effectivePayload);
-        session.messages[session.messages.length - 1] = buildUserMessage(fallbackPayload, session);
-        requestBody.messages = session.messages;
+        requestBody.messages = [
+          session.messages[0],
+          buildUserMessage(fallbackPayload, session),
+        ];
 
         await fetchAndConsumeModelStream({
           config,
@@ -427,8 +426,6 @@ async function runModelTurn(ws, session, payload) {
 
         extractor.flush();
         session.lastAssistantText = truncate(assistantText, 5000);
-        session.messages.push({ role: "assistant", content: session.lastAssistantText });
-        trimConversation(session);
 
         send(ws, "modelDone", {
           turn: session.turn,
@@ -729,16 +726,20 @@ function buildChatEndpoint(baseUrl, chatPath) {
 }
 
 function buildUserMessage(payload, session) {
-  const prompt = truncate(String(payload.prompt || "").trim(), 1200);
+  const prompt = truncate(String(payload.prompt || "").trim(), 800);
   const mode = ["new", "edit", "continue"].includes(payload.mode) ? payload.mode : "continue";
+  const includeCanvasImage = Boolean(payload.useVision && payload.canvas?.image);
+  const includeReferenceImage = Boolean(
+    !includeCanvasImage && payload.useVision && payload.reference?.image,
+  );
   const recentActions = Array.isArray(payload.recentActions)
-    ? payload.recentActions.slice(-24)
+    ? payload.recentActions.slice(-16)
     : [];
   const historyActions = Array.isArray(payload.historyActions)
-    ? payload.historyActions.slice(-120)
+    ? payload.historyActions.slice(-60)
     : [];
   const promptHistory = Array.isArray(payload.promptHistory)
-    ? payload.promptHistory.slice(-12)
+    ? payload.promptHistory.slice(-8)
     : [];
   const stats = payload.canvas?.stats || {};
   const turnBudget = normalizeTurnBudget(payload.turnBudget);
@@ -748,6 +749,11 @@ function buildUserMessage(payload, session) {
       : mode === "new"
         ? "This is a new drawing request. Establish the main subject clearly."
         : "Continue refining the existing drawing. Preserve what is already on the canvas.";
+  const referenceImageNote = includeReferenceImage
+    ? "A user reference image is attached. Use it for the requested drawing."
+    : payload.useVision && payload.reference?.image
+      ? "A user reference image exists, but it is not attached because the current canvas screenshot is the single image for this request."
+      : "";
   const blankChoiceBrief = createBlankChoiceBrief({ prompt, mode, payload });
   const statsText = [
     `Canvas: ${session.width}x${session.height}.`,
@@ -761,33 +767,30 @@ function buildUserMessage(payload, session) {
     payload.type === "feedback"
       ? "You are seeing feedback after the browser executed your previous commands."
       : "Begin the drawing.",
-    payload.useVision && payload.canvas?.image
+    includeCanvasImage
       ? "A current canvas screenshot is attached. Use the screenshot as the source of truth for what is already drawn."
       : "",
-    payload.useVision && payload.reference?.image
-      ? "A user reference image is also attached."
-      : "",
-    `Recent executed commands: ${truncate(JSON.stringify(recentActions), 2200)}.`,
+    referenceImageNote,
+    `Recent executed commands: ${truncate(JSON.stringify(recentActions), 1200)}.`,
     historyActions.length
-      ? `Accumulated drawing command history, oldest to newest and truncated: ${truncate(JSON.stringify(historyActions), 6500)}.`
+      ? `Accumulated drawing command history, oldest to newest and truncated: ${truncate(JSON.stringify(historyActions), 3000)}.`
       : "",
     promptHistory.length
-      ? `User prompt history for this drawing: ${truncate(JSON.stringify(promptHistory), 1800)}.`
+      ? `User prompt history for this drawing: ${truncate(JSON.stringify(promptHistory), 900)}.`
       : "",
-    stats.summary ? `Canvas visual summary: ${truncate(stats.summary, 1800)}.` : "",
+    stats.summary ? `Canvas visual summary: ${truncate(stats.summary, 900)}.` : "",
     "Return the next batch now as JSON objects only.",
   ]
     .filter(Boolean)
     .join("\n");
 
   const images = [];
-  if (payload.useVision && payload.canvas?.image) {
+  if (includeCanvasImage) {
     images.push({
       type: "image_url",
       image_url: { url: payload.canvas.image },
     });
-  }
-  if (payload.useVision && payload.reference?.image) {
+  } else if (includeReferenceImage) {
     images.push({
       type: "image_url",
       image_url: { url: payload.reference.image },
@@ -873,13 +876,6 @@ function createBlankChoiceBrief({ prompt, mode, payload }) {
     "Pick any drawable subject, scene, object, pattern, or abstraction you want, then draw it.",
   ]
     .join("\n");
-}
-
-function trimConversation(session) {
-  if (session.messages.length <= MAX_HISTORY_MESSAGES) return;
-  const system = session.messages[0];
-  const tail = session.messages.slice(-(MAX_HISTORY_MESSAGES - 1));
-  session.messages = [system, ...tail];
 }
 
 async function* readOpenAIContentStream(stream) {
