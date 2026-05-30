@@ -1,6 +1,6 @@
 # Agent Paint
 
-MS Paint style canvas with an agent loop for `llama-server`.
+MS Paint style canvas with an agent loop for OpenAI-compatible chat APIs.
 
 The browser draws commands as they stream from the model. After each batch it can send a downscaled canvas screenshot and a compact visual summary back to the model, so the agent can continue or correct its drawing.
 
@@ -22,10 +22,28 @@ http://127.0.0.1:8081/v1/chat/completions
 Override it either in the UI or with environment variables:
 
 ```bash
-LLAMA_SERVER_URL=http://127.0.0.1:8081 LLAMA_MODEL=gemma-4-26B-A4B-it-Q4_K_M.gguf npm start
+LLM_PROVIDER=llama LLM_BASE_URL=http://127.0.0.1:8081 LLM_MODEL=gemma-4-26B-A4B-it-Q4_K_M.gguf npm start
 ```
 
-## Expected llama-server API
+Provider-specific API key environment variables are used when the UI key field is blank:
+
+```bash
+OPENAI_API_KEY=... LLM_PROVIDER=openai npm start
+ANTHROPIC_API_KEY=... LLM_PROVIDER=anthropic npm start
+```
+
+## Providers
+
+The app has presets for:
+
+- **Local llama.cpp**: `http://127.0.0.1:8081/v1/chat/completions`
+- **OpenAI**: `https://api.openai.com/v1/chat/completions`
+- **Claude**: Anthropic's OpenAI-compatible endpoint, `https://api.anthropic.com/v1/chat/completions`
+- **Custom OpenAI-compatible**: editable base URL, path, model, and optional API key
+
+Claude support uses Anthropic's OpenAI-compatible API layer, not the native Messages API. The bridge filters provider-specific request fields so llama.cpp receives llama.cpp sampler controls, OpenAI/custom endpoints receive common OpenAI fields, and Claude receives only fields supported by the compatibility layer.
+
+## Expected API
 
 The server bridge expects an OpenAI-compatible streaming chat endpoint:
 
@@ -33,9 +51,9 @@ The server bridge expects an OpenAI-compatible streaming chat endpoint:
 POST /v1/chat/completions
 ```
 
-with `stream: true`. Current `llama-server` builds commonly expose this route.
+with `stream: true`.
 
-For vision feedback, use a model/server build that accepts OpenAI-style `image_url` message content. The app probes `/props`; when `modalities.vision` is true, "Send screenshots to model" is enabled by default. When enabled, each agent turn includes a downscaled JPEG screenshot of the current canvas plus the compact text summary.
+For vision feedback, use a model/server build that accepts OpenAI-style `image_url` message content. Local llama.cpp endpoints are probed with `/props`; OpenAI, Claude, and custom OpenAI-compatible endpoints are allowed to receive screenshots when the UI checkbox is enabled. When enabled, each agent turn includes a downscaled JPEG screenshot of the current canvas plus the compact text summary.
 
 ## Agent command format
 

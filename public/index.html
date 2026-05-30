@@ -59,8 +59,17 @@
         <aside class="agent-panel" aria-label="Agent controls">
           <section class="panel-section">
             <h1>Agent</h1>
+            <label class="field compact">
+              <span>provider</span>
+              <select id="providerSelect">
+                <option value="llama">Local llama.cpp</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Claude</option>
+                <option value="custom">Custom OpenAI-compatible</option>
+              </select>
+            </label>
             <label class="field">
-              <span>llama-server</span>
+              <span>API base URL</span>
               <input id="llamaUrl" type="url" spellcheck="false" />
             </label>
             <label class="field compact">
@@ -70,6 +79,10 @@
             <label class="field compact">
               <span>model</span>
               <input id="modelName" type="text" spellcheck="false" />
+            </label>
+            <label class="field compact">
+              <span>API key</span>
+              <input id="apiKeyInput" type="password" spellcheck="false" autocomplete="off" placeholder="Uses provider env var if blank" />
             </label>
           </section>
 

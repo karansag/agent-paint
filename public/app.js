@@ -13,9 +13,11 @@ const clearBtn = document.querySelector("#clearBtn");
 const exportBtn = document.querySelector("#exportBtn");
 const cursorStatus = document.querySelector("#cursorStatus");
 const agentStatus = document.querySelector("#agentStatus");
+const providerSelect = document.querySelector("#providerSelect");
 const llamaUrl = document.querySelector("#llamaUrl");
 const chatPath = document.querySelector("#chatPath");
 const modelName = document.querySelector("#modelName");
+const apiKeyInput = document.querySelector("#apiKeyInput");
 const agentPrompt = document.querySelector("#agentPrompt");
 const referenceInput = document.querySelector("#referenceInput");
 const referencePreview = document.querySelector("#referencePreview");
@@ -64,6 +66,7 @@ const state = {
   queueRunning: false,
   ws: null,
   agentRunning: false,
+  providerDefaults: new Map(),
   visionSupported: false,
   visionUserChanged: false,
   modelStreaming: false,
@@ -98,16 +101,93 @@ async function loadServerConfig() {
   try {
     const response = await fetch("/api/config", { cache: "no-store" });
     const config = await response.json();
-    llamaUrl.value = config.llamaServerUrl || "http://127.0.0.1:8081";
-    chatPath.value = config.llamaChatPath || "/v1/chat/completions";
+    configureProviders(config.providers);
+    providerSelect.value = config.provider || "llama";
+    llamaUrl.value = config.apiBaseUrl || config.llamaServerUrl || "http://127.0.0.1:8081";
+    chatPath.value = config.chatPath || config.llamaChatPath || "/v1/chat/completions";
     modelName.value = config.model || "gemma-4-26B-A4B-it-Q4_K_M.gguf";
+    updateProviderKeyHint(providerSelect.value);
     setVisionSupported(Boolean(config.visionSupported));
   } catch {
+    configureProviders();
+    providerSelect.value = "llama";
     llamaUrl.value = "http://127.0.0.1:8081";
     chatPath.value = "/v1/chat/completions";
     modelName.value = "gemma-4-26B-A4B-it-Q4_K_M.gguf";
+    updateProviderKeyHint(providerSelect.value);
     setVisionSupported(false);
   }
+}
+
+function configureProviders(providers = []) {
+  const defaults = Array.isArray(providers) && providers.length > 0 ? providers : getFallbackProviders();
+  state.providerDefaults = new Map(defaults.map((provider) => [provider.id, provider]));
+  providerSelect.replaceChildren(
+    ...defaults.map((provider) => {
+      const option = document.createElement("option");
+      option.value = provider.id;
+      option.textContent = provider.label;
+      return option;
+    }),
+  );
+}
+
+function getFallbackProviders() {
+  return [
+    {
+      id: "llama",
+      label: "Local llama.cpp",
+      apiBaseUrl: "http://127.0.0.1:8081",
+      chatPath: "/v1/chat/completions",
+      model: "gemma-4-26B-A4B-it-Q4_K_M.gguf",
+      visionDefault: false,
+    },
+    {
+      id: "openai",
+      label: "OpenAI",
+      apiBaseUrl: "https://api.openai.com/v1",
+      chatPath: "/chat/completions",
+      model: "gpt-4.1-mini",
+      visionDefault: true,
+    },
+    {
+      id: "anthropic",
+      label: "Claude",
+      apiBaseUrl: "https://api.anthropic.com/v1",
+      chatPath: "/chat/completions",
+      model: "claude-sonnet-4-6",
+      visionDefault: true,
+    },
+    {
+      id: "custom",
+      label: "Custom OpenAI-compatible",
+      apiBaseUrl: "http://127.0.0.1:8081",
+      chatPath: "/v1/chat/completions",
+      model: "",
+      visionDefault: true,
+    },
+  ];
+}
+
+function applyProviderDefaults(providerId) {
+  const defaults = state.providerDefaults.get(providerId);
+  if (!defaults) return;
+
+  llamaUrl.value = defaults.apiBaseUrl || "";
+  chatPath.value = defaults.chatPath || "/v1/chat/completions";
+  modelName.value = defaults.model || "";
+  apiKeyInput.value = "";
+  updateProviderKeyHint(providerId);
+  state.visionUserChanged = false;
+  setVisionSupported(Boolean(defaults.visionDefault));
+  logEvent(`provider: ${defaults.label}`);
+}
+
+function updateProviderKeyHint(providerId) {
+  const defaults = state.providerDefaults.get(providerId);
+  apiKeyInput.placeholder = defaults?.needsApiKey
+    ? "Uses provider env var if blank"
+    : "Optional for local endpoints";
 }
 
 function buildSwatches() {
@@ -134,6 +214,9 @@ function installControls() {
 
   colorInput.addEventListener("input", () => setColor(colorInput.value));
   brushSize.addEventListener("input", () => setBrush(Number(brushSize.value)));
+  providerSelect.addEventListener("change", () => {
+    applyProviderDefaults(providerSelect.value);
+  });
   useVision.addEventListener("change", () => {
     state.visionUserChanged = true;
   });
@@ -857,9 +940,12 @@ function handleSocketMessage(event) {
   const message = JSON.parse(event.data);
 
   if (message.type === "hello") {
-    if (!llamaUrl.value) llamaUrl.value = message.llamaServerUrl || "";
-    if (!chatPath.value) chatPath.value = message.llamaChatPath || "";
+    if (message.providers) configureProviders(message.providers);
+    if (message.provider && !providerSelect.value) providerSelect.value = message.provider;
+    if (!llamaUrl.value) llamaUrl.value = message.apiBaseUrl || message.llamaServerUrl || "";
+    if (!chatPath.value) chatPath.value = message.chatPath || message.llamaChatPath || "";
     if (!modelName.value) modelName.value = message.model || "";
+    updateProviderKeyHint(providerSelect.value);
     setVisionSupported(Boolean(message.visionSupported));
     return;
   }
@@ -871,7 +957,7 @@ function handleSocketMessage(event) {
     state.continueRequested = true;
     setAgentButtons();
     setStatus(`Turn ${message.turn}: streaming`);
-    logEvent(`model start: ${message.endpoint}`);
+    logEvent(`model start: ${message.providerLabel || message.provider || "provider"} ${message.endpoint}`);
     if (message.sampling) {
       logEvent(
         `sampling: temp=${message.sampling.temperature}, top_p=${message.sampling.topP}, top_k=${message.sampling.topK}, min_p=${message.sampling.minP}`,
@@ -983,9 +1069,13 @@ function getModelConfig({ blankNewPrompt = false } = {}) {
   const sampling = blankNewPrompt ? getCreativeSamplingConfig(state.creativity) : {};
 
   return {
+    provider: providerSelect.value,
+    apiBaseUrl: llamaUrl.value.trim(),
+    chatPath: chatPath.value.trim(),
     llamaServerUrl: llamaUrl.value.trim(),
     llamaChatPath: chatPath.value.trim(),
     model: modelName.value.trim(),
+    apiKey: apiKeyInput.value.trim(),
     temperature: blankNewPrompt ? sampling.temperature : 0.65,
     maxTokens: 1400,
     seed: blankNewPrompt ? randomSeed() : null,
@@ -1158,8 +1248,8 @@ function setAgentButtons() {
 function setVisionSupported(supported) {
   state.visionSupported = supported;
   useVision.title = supported
-    ? "Canvas screenshots are sent to the model on each agent turn."
-    : "The current llama-server endpoint has not reported vision support.";
+    ? "Canvas screenshots are sent to the provider on each agent turn."
+    : "The current endpoint has not reported vision support.";
 
   if (!state.visionUserChanged) {
     useVision.checked = supported;

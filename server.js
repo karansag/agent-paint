@@ -8,14 +8,81 @@ const ROOT_DIR = fileURLToPath(new URL(".", import.meta.url));
 const PUBLIC_DIR = join(ROOT_DIR, "public");
 
 const PORT = Number(process.env.PORT || 5173);
-const LLAMA_SERVER_ENV_URL = process.env.LLAMA_SERVER_URL || process.env.OPENAI_BASE_URL || "";
-const LLAMA_MODEL_ENV = process.env.LLAMA_MODEL || process.env.MODEL || "";
-const DEFAULT_LLAMA_CHAT_PATH = process.env.LLAMA_CHAT_PATH || "/v1/chat/completions";
-const DEFAULT_MAX_TOKENS = Number(process.env.LLAMA_MAX_TOKENS || 1400);
+const PROVIDER_DEFINITIONS = {
+  llama: {
+    label: "Local llama.cpp",
+    defaultBaseUrl: "http://127.0.0.1:8081",
+    defaultChatPath: "/v1/chat/completions",
+    defaultModel: "gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    tokenParam: "max_tokens",
+    maxTemperature: 2,
+    apiKeyEnv: ["LLAMA_API_KEY", "LLM_API_KEY", "OPENAI_API_KEY"],
+    visionStrategy: "llama-props",
+    sampling: "llama",
+  },
+  openai: {
+    label: "OpenAI",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    defaultChatPath: "/chat/completions",
+    defaultModel: "gpt-4.1-mini",
+    tokenParam: "max_completion_tokens",
+    maxTemperature: 2,
+    apiKeyEnv: ["OPENAI_API_KEY", "LLM_API_KEY"],
+    visionStrategy: "assume",
+    sampling: "openai",
+  },
+  anthropic: {
+    label: "Claude",
+    defaultBaseUrl: "https://api.anthropic.com/v1",
+    defaultChatPath: "/chat/completions",
+    defaultModel: "claude-sonnet-4-6",
+    tokenParam: "max_tokens",
+    maxTemperature: 1,
+    apiKeyEnv: ["ANTHROPIC_API_KEY", "LLM_API_KEY"],
+    visionStrategy: "assume",
+    sampling: "anthropic",
+  },
+  custom: {
+    label: "Custom OpenAI-compatible",
+    defaultBaseUrl: "http://127.0.0.1:8081",
+    defaultChatPath: "/v1/chat/completions",
+    defaultModel: "",
+    tokenParam: "max_tokens",
+    maxTemperature: 2,
+    apiKeyEnv: ["LLM_API_KEY", "OPENAI_API_KEY"],
+    visionStrategy: "assume",
+    sampling: "openai",
+  },
+};
+const GENERIC_PROVIDER_ENV = process.env.LLM_PROVIDER || process.env.PROVIDER || "";
+const GENERIC_BASE_URL_ENV =
+  process.env.LLM_BASE_URL ||
+  process.env.API_BASE_URL ||
+  process.env.OPENAI_BASE_URL ||
+  process.env.ANTHROPIC_BASE_URL ||
+  process.env.LLAMA_SERVER_URL ||
+  "";
+const GENERIC_MODEL_ENV =
+  process.env.LLM_MODEL ||
+  process.env.MODEL ||
+  process.env.OPENAI_MODEL ||
+  process.env.ANTHROPIC_MODEL ||
+  process.env.LLAMA_MODEL ||
+  "";
+const GENERIC_CHAT_PATH_ENV =
+  process.env.LLM_CHAT_PATH ||
+  process.env.CHAT_COMPLETIONS_PATH ||
+  process.env.OPENAI_CHAT_PATH ||
+  process.env.ANTHROPIC_CHAT_PATH ||
+  process.env.LLAMA_CHAT_PATH ||
+  "";
+const DEFAULT_MAX_TOKENS = Number(process.env.LLM_MAX_TOKENS || process.env.LLAMA_MAX_TOKENS || 1400);
 const MAX_HISTORY_MESSAGES = 15;
-const STARTUP_LLAMA_CONFIG = await resolveStartupLlamaConfig();
-const DEFAULT_LLAMA_SERVER_URL = STARTUP_LLAMA_CONFIG.llamaServerUrl;
-const DEFAULT_MODEL = STARTUP_LLAMA_CONFIG.model;
+const STARTUP_PROVIDER_CONFIG = await resolveStartupProviderConfig();
+const DEFAULT_PROVIDER = STARTUP_PROVIDER_CONFIG.provider;
+const DEFAULT_API_BASE_URL = STARTUP_PROVIDER_CONFIG.apiBaseUrl;
+const DEFAULT_CHAT_PATH = STARTUP_PROVIDER_CONFIG.chatPath;
+const DEFAULT_MODEL = STARTUP_PROVIDER_CONFIG.model;
 
 const MIME_TYPES = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -65,12 +132,19 @@ Good drawing strategy:
 const server = http.createServer(async (req, res) => {
   try {
     if (req.url === "/api/config") {
-      const visionSupported = await detectVisionSupport(DEFAULT_LLAMA_SERVER_URL);
+      const visionSupported = await detectVisionSupport({
+        provider: DEFAULT_PROVIDER,
+        baseUrl: DEFAULT_API_BASE_URL,
+      });
       sendJson(res, {
-        llamaServerUrl: DEFAULT_LLAMA_SERVER_URL,
-        llamaChatPath: DEFAULT_LLAMA_CHAT_PATH,
+        provider: DEFAULT_PROVIDER,
+        providers: buildProviderOptions(visionSupported),
+        apiBaseUrl: DEFAULT_API_BASE_URL,
+        chatPath: DEFAULT_CHAT_PATH,
         model: DEFAULT_MODEL,
         visionSupported,
+        llamaServerUrl: DEFAULT_API_BASE_URL,
+        llamaChatPath: DEFAULT_CHAT_PATH,
       });
       return;
     }
@@ -102,12 +176,20 @@ wss.on("connection", async (ws) => {
     turn: 0,
     lastAssistantText: "",
   };
+  const defaultVisionSupported = await detectVisionSupport({
+    provider: DEFAULT_PROVIDER,
+    baseUrl: DEFAULT_API_BASE_URL,
+  });
 
   send(ws, "hello", {
-    llamaServerUrl: DEFAULT_LLAMA_SERVER_URL,
-    llamaChatPath: DEFAULT_LLAMA_CHAT_PATH,
+    provider: DEFAULT_PROVIDER,
+    providers: buildProviderOptions(defaultVisionSupported),
+    apiBaseUrl: DEFAULT_API_BASE_URL,
+    chatPath: DEFAULT_CHAT_PATH,
     model: DEFAULT_MODEL,
-    visionSupported: await detectVisionSupport(DEFAULT_LLAMA_SERVER_URL),
+    visionSupported: defaultVisionSupported,
+    llamaServerUrl: DEFAULT_API_BASE_URL,
+    llamaChatPath: DEFAULT_CHAT_PATH,
   });
 
   ws.on("message", async (raw) => {
@@ -145,7 +227,9 @@ wss.on("connection", async (ws) => {
 
 server.listen(PORT, () => {
   console.log(`Agent Paint listening at http://localhost:${PORT}`);
-  console.log(`Default llama-server URL: ${DEFAULT_LLAMA_SERVER_URL}${DEFAULT_LLAMA_CHAT_PATH}`);
+  console.log(
+    `Default provider: ${getProviderDefinition(DEFAULT_PROVIDER).label} at ${buildChatEndpoint(DEFAULT_API_BASE_URL, DEFAULT_CHAT_PATH)}`,
+  );
 });
 
 function resolvePublicPath(url) {
@@ -202,10 +286,19 @@ async function runModelTurn(ws, session, payload) {
   session.abortController = new AbortController();
   session.turn += 1;
 
-  const config = normalizeModelConfig(payload.config);
+  let config;
+  try {
+    config = normalizeModelConfig(payload.config);
+  } catch (error) {
+    send(ws, "error", { message: formatModelError(error) });
+    session.running = false;
+    session.abortController = null;
+    return;
+  }
+
   session.width = clampInt(payload.canvas?.width, 128, 2048, session.width);
   session.height = clampInt(payload.canvas?.height, 128, 2048, session.height);
-  const visionSupported = payload.useVision ? await detectVisionSupport(config.baseUrl) : false;
+  const visionSupported = payload.useVision ? await detectVisionSupport(config) : false;
   const effectivePayload = {
     ...payload,
     useVision: Boolean(payload.useVision && visionSupported),
@@ -213,7 +306,7 @@ async function runModelTurn(ws, session, payload) {
 
   if (payload.useVision && !visionSupported) {
     send(ws, "modelWarning", {
-      message: "Screenshots were requested, but llama-server does not currently report vision support.",
+      message: `${config.providerLabel} was asked to receive screenshots, but this endpoint does not currently report vision support.`,
     });
   }
 
@@ -221,15 +314,7 @@ async function runModelTurn(ws, session, payload) {
   session.messages.push(userMessage);
   trimConversation(session);
 
-  const requestBody = {
-    model: config.model,
-    messages: session.messages,
-    stream: true,
-    temperature: config.temperature,
-    max_tokens: config.maxTokens,
-  };
-  if (config.seed !== null) requestBody.seed = config.seed;
-  addSamplingParams(requestBody, config);
+  const requestBody = buildChatCompletionRequest(config, session.messages);
   const requestUsesVision = Boolean(
     effectivePayload.useVision &&
       (effectivePayload.canvas?.image || effectivePayload.reference?.image),
@@ -242,7 +327,9 @@ async function runModelTurn(ws, session, payload) {
 
   send(ws, "modelStart", {
     turn: session.turn,
-    endpoint: `${config.baseUrl}${config.chatPath}`,
+    provider: config.provider,
+    providerLabel: config.providerLabel,
+    endpoint: config.endpoint,
     usingVision: requestUsesVision,
     sampling: {
       temperature: config.temperature,
@@ -378,7 +465,7 @@ async function runModelTurn(ws, session, payload) {
 }
 
 async function fetchAndConsumeModelStream({ config, requestBody, signal, onContent }) {
-  const response = await fetch(`${config.baseUrl}${config.chatPath}`, {
+  const response = await fetch(config.endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -391,12 +478,12 @@ async function fetchAndConsumeModelStream({ config, requestBody, signal, onConte
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(
-      `llama-server returned ${response.status}: ${truncate(errorText || response.statusText, 1200)}`,
+      `${config.providerLabel} returned ${response.status}: ${truncate(errorText || response.statusText, 1200)}`,
     );
   }
 
   if (!response.body) {
-    throw new Error("llama-server response did not include a readable stream.");
+    throw new Error(`${config.providerLabel} response did not include a readable stream.`);
   }
 
   for await (const content of readOpenAIContentStream(response.body)) {
@@ -405,15 +492,29 @@ async function fetchAndConsumeModelStream({ config, requestBody, signal, onConte
 }
 
 function normalizeModelConfig(input = {}) {
-  const baseUrl = normalizeBaseUrl(input.llamaServerUrl || DEFAULT_LLAMA_SERVER_URL);
-  const chatPath = normalizePath(input.llamaChatPath || DEFAULT_LLAMA_CHAT_PATH);
+  const rawBaseUrl = input.apiBaseUrl || input.llamaServerUrl || "";
+  const provider = normalizeProviderId(
+    input.provider || inferProviderFromBaseUrl(rawBaseUrl) || DEFAULT_PROVIDER,
+  );
+  const definition = getProviderDefinition(provider);
+  const baseUrl = normalizeBaseUrl(rawBaseUrl || definition.defaultBaseUrl, definition.defaultBaseUrl);
+  const chatPath = normalizePath(
+    input.chatPath || input.llamaChatPath || definition.defaultChatPath,
+    definition.defaultChatPath,
+  );
+  const fallbackTemperature = Math.min(0.65, definition.maxTemperature);
 
   return {
+    provider,
+    providerLabel: definition.label,
+    tokenParam: definition.tokenParam,
+    sampling: definition.sampling,
     baseUrl,
     chatPath,
-    model: String(input.model || DEFAULT_MODEL).trim() || DEFAULT_MODEL,
-    apiKey: String(input.apiKey || process.env.OPENAI_API_KEY || "").trim(),
-    temperature: clampNumber(input.temperature, 0, 2, 0.65),
+    endpoint: buildChatEndpoint(baseUrl, chatPath),
+    model: String(input.model || definition.defaultModel || DEFAULT_MODEL).trim() || DEFAULT_MODEL,
+    apiKey: String(input.apiKey || getProviderApiKey(provider) || "").trim(),
+    temperature: clampNumber(input.temperature, 0, definition.maxTemperature, fallbackTemperature),
     maxTokens: clampInt(input.maxTokens, 256, 8192, DEFAULT_MAX_TOKENS),
     seed: input.seed === undefined || input.seed === null ? null : clampInt(input.seed, 0, 4294967295, 0),
     topP: optionalNumber(input.topP, 0, 1),
@@ -429,49 +530,77 @@ function normalizeModelConfig(input = {}) {
   };
 }
 
+function buildChatCompletionRequest(config, messages) {
+  const requestBody = {
+    model: config.model,
+    messages,
+    stream: true,
+    temperature: config.temperature,
+  };
+
+  requestBody[config.tokenParam] = config.maxTokens;
+  addSamplingParams(requestBody, config);
+  return requestBody;
+}
+
 function addSamplingParams(requestBody, config) {
-  const mappings = [
-    ["top_p", config.topP],
-    ["top_k", config.topK],
-    ["min_p", config.minP],
-    ["repeat_penalty", config.repeatPenalty],
-    ["presence_penalty", config.presencePenalty],
-    ["frequency_penalty", config.frequencyPenalty],
-    ["xtc_probability", config.xtcProbability],
-    ["xtc_threshold", config.xtcThreshold],
-    ["dynatemp_range", config.dynatempRange],
-    ["dynatemp_exponent", config.dynatempExponent],
-  ];
+  const mappings =
+    config.sampling === "llama"
+      ? [
+          ["seed", config.seed],
+          ["top_p", config.topP],
+          ["top_k", config.topK],
+          ["min_p", config.minP],
+          ["repeat_penalty", config.repeatPenalty],
+          ["presence_penalty", config.presencePenalty],
+          ["frequency_penalty", config.frequencyPenalty],
+          ["xtc_probability", config.xtcProbability],
+          ["xtc_threshold", config.xtcThreshold],
+          ["dynatemp_range", config.dynatempRange],
+          ["dynatemp_exponent", config.dynatempExponent],
+        ]
+      : config.sampling === "openai"
+        ? [
+            ["top_p", config.topP],
+            ["presence_penalty", config.presencePenalty],
+            ["frequency_penalty", config.frequencyPenalty],
+          ]
+        : [];
 
   for (const [key, value] of mappings) {
     if (value !== null) requestBody[key] = value;
   }
 }
 
-async function resolveStartupLlamaConfig() {
-  const fallbackUrl = "http://127.0.0.1:8081";
-  const fallbackModel = LLAMA_MODEL_ENV || "gemma-4-26B-A4B-it-Q4_K_M.gguf";
+async function resolveStartupProviderConfig() {
+  const provider = normalizeProviderId(
+    GENERIC_PROVIDER_ENV || inferProviderFromBaseUrl(GENERIC_BASE_URL_ENV) || "llama",
+  );
+  const definition = getProviderDefinition(provider);
+  const chatPath = normalizePath(GENERIC_CHAT_PATH_ENV || definition.defaultChatPath, definition.defaultChatPath);
 
-  if (LLAMA_SERVER_ENV_URL) {
-    const llamaServerUrl = normalizeBaseUrl(LLAMA_SERVER_ENV_URL);
-    return {
-      llamaServerUrl,
-      model: LLAMA_MODEL_ENV || (await detectModelName(llamaServerUrl)) || fallbackModel,
-    };
-  }
-
-  for (const candidate of ["http://127.0.0.1:8081", "http://127.0.0.1:8080"]) {
-    if (await isLlamaServerHealthy(candidate)) {
-      return {
-        llamaServerUrl: candidate,
-        model: LLAMA_MODEL_ENV || (await detectModelName(candidate)) || fallbackModel,
-      };
+  if (provider === "llama" && !GENERIC_BASE_URL_ENV) {
+    for (const candidate of ["http://127.0.0.1:8081", "http://127.0.0.1:8080"]) {
+      if (await isLlamaServerHealthy(candidate)) {
+        return {
+          provider,
+          apiBaseUrl: candidate,
+          chatPath,
+          model: GENERIC_MODEL_ENV || (await detectModelName(candidate)) || definition.defaultModel,
+        };
+      }
     }
   }
 
+  const apiBaseUrl = normalizeBaseUrl(
+    GENERIC_BASE_URL_ENV || definition.defaultBaseUrl,
+    definition.defaultBaseUrl,
+  );
   return {
-    llamaServerUrl: fallbackUrl,
-    model: fallbackModel,
+    provider,
+    apiBaseUrl,
+    chatPath,
+    model: GENERIC_MODEL_ENV || (provider === "llama" ? await detectModelName(apiBaseUrl) : "") || definition.defaultModel,
   };
 }
 
@@ -505,9 +634,16 @@ async function detectModelName(baseUrl) {
   }
 }
 
-async function detectVisionSupport(baseUrl) {
+async function detectVisionSupport(config) {
+  const provider = normalizeProviderId(config?.provider || DEFAULT_PROVIDER);
+  const definition = getProviderDefinition(provider);
+
+  if (definition.visionStrategy === "assume") {
+    return true;
+  }
+
   try {
-    const response = await fetch(`${normalizeBaseUrl(baseUrl)}/props`, {
+    const response = await fetch(`${normalizeBaseUrl(config?.baseUrl || DEFAULT_API_BASE_URL)}/props`, {
       signal: AbortSignal.timeout(1200),
     });
     if (!response.ok) return false;
@@ -519,10 +655,55 @@ async function detectVisionSupport(baseUrl) {
   }
 }
 
-function normalizeBaseUrl(value) {
-  const url = new URL(String(value || DEFAULT_LLAMA_SERVER_URL).trim());
+function buildProviderOptions(defaultProviderVisionSupported = false) {
+  return Object.entries(PROVIDER_DEFINITIONS).map(([id, definition]) => ({
+    id,
+    label: definition.label,
+    apiBaseUrl: id === DEFAULT_PROVIDER ? DEFAULT_API_BASE_URL : definition.defaultBaseUrl,
+    chatPath: id === DEFAULT_PROVIDER ? DEFAULT_CHAT_PATH : definition.defaultChatPath,
+    model: id === DEFAULT_PROVIDER ? DEFAULT_MODEL : definition.defaultModel,
+    needsApiKey: id !== "llama",
+    visionDefault:
+      id === DEFAULT_PROVIDER
+        ? defaultProviderVisionSupported
+        : definition.visionStrategy === "assume",
+  }));
+}
+
+function getProviderDefinition(provider) {
+  return PROVIDER_DEFINITIONS[provider] || PROVIDER_DEFINITIONS.custom;
+}
+
+function normalizeProviderId(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["claude", "anthropic"].includes(normalized)) return "anthropic";
+  if (["local", "llama", "llama.cpp", "llamacpp"].includes(normalized)) return "llama";
+  if (normalized === "openai") return "openai";
+  if (normalized === "custom") return "custom";
+  return PROVIDER_DEFINITIONS[normalized] ? normalized : "custom";
+}
+
+function inferProviderFromBaseUrl(value) {
+  const text = String(value || "").toLowerCase();
+  if (!text) return "";
+  if (text.includes("anthropic.com") || text.includes("claude.com")) return "anthropic";
+  if (text.includes("openai.com")) return "openai";
+  if (text.includes("127.0.0.1") || text.includes("localhost")) return "llama";
+  return "custom";
+}
+
+function getProviderApiKey(provider) {
+  const definition = getProviderDefinition(provider);
+  for (const name of definition.apiKeyEnv) {
+    if (process.env[name]) return process.env[name];
+  }
+  return "";
+}
+
+function normalizeBaseUrl(value, fallback = DEFAULT_API_BASE_URL) {
+  const url = new URL(String(value || fallback).trim());
   if (!["http:", "https:"].includes(url.protocol)) {
-    throw new Error("llama-server URL must start with http:// or https://.");
+    throw new Error("API base URL must start with http:// or https://.");
   }
   url.pathname = url.pathname.replace(/\/+$/, "");
   url.search = "";
@@ -530,9 +711,21 @@ function normalizeBaseUrl(value) {
   return url.toString().replace(/\/$/, "");
 }
 
-function normalizePath(value) {
-  const path = String(value || DEFAULT_LLAMA_CHAT_PATH).trim();
+function normalizePath(value, fallback = DEFAULT_CHAT_PATH) {
+  const path = String(value || fallback).trim();
   return path.startsWith("/") ? path : `/${path}`;
+}
+
+function buildChatEndpoint(baseUrl, chatPath) {
+  const normalizedBase = normalizeBaseUrl(baseUrl);
+  let normalizedPath = normalizePath(chatPath);
+  const basePath = new URL(normalizedBase).pathname.replace(/\/+$/, "");
+
+  if (basePath.endsWith("/v1") && normalizedPath.startsWith("/v1/")) {
+    normalizedPath = normalizedPath.slice(3);
+  }
+
+  return `${normalizedBase}${normalizedPath}`;
 }
 
 function buildUserMessage(payload, session) {
