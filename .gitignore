@@ -1,2 +1,7 @@
 node_modules/
 .claude/
+.env
+.env.*
+!.env.example
+*~
+*.~undo-tree~

@@ -14,8 +14,8 @@ const exportBtn = document.querySelector("#exportBtn");
 const cursorStatus = document.querySelector("#cursorStatus");
 const agentStatus = document.querySelector("#agentStatus");
 const providerSelect = document.querySelector("#providerSelect");
-const llamaUrl = document.querySelector("#llamaUrl");
-const chatPath = document.querySelector("#chatPath");
+const apiBaseUrl = document.querySelector("#apiBaseUrl");
+const modelSelect = document.querySelector("#modelSelect");
 const modelName = document.querySelector("#modelName");
 const apiKeyInput = document.querySelector("#apiKeyInput");
 const agentPrompt = document.querySelector("#agentPrompt");
@@ -32,12 +32,33 @@ const stepAgentBtn = document.querySelector("#stepAgentBtn");
 const stopAgentBtn = document.querySelector("#stopAgentBtn");
 const eventLog = document.querySelector("#eventLog");
 
-const CANVAS_WIDTH = canvas.width;
-const CANVAS_HEIGHT = canvas.height;
-const HISTORY_LIMIT = 50;
-const COMMAND_LOG_LIMIT = 32;
-const AGENT_HISTORY_LIMIT = 180;
+const HISTORY_LIMIT = 40;
+const RECENT_ELEMENT_LIMIT = 24;
+const ELEMENT_HISTORY_LIMIT = 120;
+const ELEMENT_SNIPPET_LIMIT = 400;
 const PROMPT_HISTORY_LIMIT = 20;
+const SVG_NS = "http://www.w3.org/2000/svg";
+const CUSTOM_MODEL_OPTION = "__custom__";
+const ALLOWED_SVG_TAGS = new Set([
+  "path",
+  "rect",
+  "circle",
+  "ellipse",
+  "line",
+  "polyline",
+  "polygon",
+  "text",
+  "tspan",
+  "g",
+  "defs",
+  "use",
+  "symbol",
+  "linearGradient",
+  "radialGradient",
+  "stop",
+  "title",
+  "desc",
+]);
 const SWATCHES = [
   "#111827",
   "#ffffff",
@@ -60,9 +81,8 @@ const state = {
   isDrawing: false,
   startPoint: null,
   lastPoint: null,
-  currentPoints: [],
   undoStack: [],
-  commandQueue: [],
+  elementQueue: [],
   queueRunning: false,
   ws: null,
   agentRunning: false,
@@ -78,10 +98,13 @@ const state = {
   creativeRunActive: false,
   noProgressTurns: 0,
   agentSessionStarted: false,
-  recentAgentActions: [],
-  agentActionHistory: [],
+  recentElements: [],
+  elementHistory: [],
   promptHistory: [],
   reference: null,
+  // Gradients/symbols defined by earlier elements, kept so later elements
+  // can reference them: each element is rasterized as a standalone SVG.
+  svgDefsById: new Map(),
 };
 
 ctx.lineCap = "round";
@@ -100,27 +123,25 @@ setStatus("Idle");
 async function loadServerConfig() {
   try {
     const response = await fetch("/api/config", { cache: "no-store" });
-    const config = await response.json();
-    configureProviders(config.providers);
-    providerSelect.value = config.provider || "llama";
-    llamaUrl.value = config.apiBaseUrl || config.llamaServerUrl || "http://127.0.0.1:8081";
-    chatPath.value = config.chatPath || config.llamaChatPath || "/v1/chat/completions";
-    modelName.value = config.model || "gemma-4-26B-A4B-it-Q4_K_M.gguf";
-    updateProviderKeyHint(providerSelect.value);
-    setVisionSupported(Boolean(config.visionSupported));
+    applyServerConfig(await response.json());
   } catch {
-    configureProviders();
-    providerSelect.value = "llama";
-    llamaUrl.value = "http://127.0.0.1:8081";
-    chatPath.value = "/v1/chat/completions";
-    modelName.value = "gemma-4-26B-A4B-it-Q4_K_M.gguf";
-    updateProviderKeyHint(providerSelect.value);
-    setVisionSupported(false);
+    applyServerConfig({});
   }
 }
 
+function applyServerConfig(config) {
+  configureProviders(config.providers);
+  providerSelect.value = config.provider || "llama";
+  const defaults = state.providerDefaults.get(providerSelect.value) || {};
+  apiBaseUrl.value = config.apiBaseUrl || defaults.apiBaseUrl || "http://127.0.0.1:8081";
+  updateProviderKeyHint(providerSelect.value);
+  setVisionSupported(Boolean(config.visionSupported));
+  refreshModelList(config.model || defaults.model || "");
+}
+
 function configureProviders(providers = []) {
-  const defaults = Array.isArray(providers) && providers.length > 0 ? providers : getFallbackProviders();
+  const defaults =
+    Array.isArray(providers) && providers.length > 0 ? providers : getFallbackProviders();
   state.providerDefaults = new Map(defaults.map((provider) => [provider.id, provider]));
   providerSelect.replaceChildren(
     ...defaults.map((provider) => {
@@ -138,7 +159,6 @@ function getFallbackProviders() {
       id: "llama",
       label: "Local llama.cpp",
       apiBaseUrl: "http://127.0.0.1:8081",
-      chatPath: "/v1/chat/completions",
       model: "gemma-4-26B-A4B-it-Q4_K_M.gguf",
       visionDefault: false,
     },
@@ -146,23 +166,22 @@ function getFallbackProviders() {
       id: "openai",
       label: "OpenAI",
       apiBaseUrl: "https://api.openai.com/v1",
-      chatPath: "/chat/completions",
       model: "gpt-4.1-mini",
+      needsApiKey: true,
       visionDefault: true,
     },
     {
       id: "anthropic",
       label: "Claude",
       apiBaseUrl: "https://api.anthropic.com/v1",
-      chatPath: "/chat/completions",
-      model: "claude-sonnet-4-6",
+      model: "claude-opus-4-8",
+      needsApiKey: true,
       visionDefault: true,
     },
     {
       id: "custom",
       label: "Custom OpenAI-compatible",
       apiBaseUrl: "http://127.0.0.1:8081",
-      chatPath: "/v1/chat/completions",
       model: "",
       visionDefault: true,
     },
@@ -173,14 +192,70 @@ function applyProviderDefaults(providerId) {
   const defaults = state.providerDefaults.get(providerId);
   if (!defaults) return;
 
-  llamaUrl.value = defaults.apiBaseUrl || "";
-  chatPath.value = defaults.chatPath || "/v1/chat/completions";
-  modelName.value = defaults.model || "";
+  apiBaseUrl.value = defaults.apiBaseUrl || "";
   apiKeyInput.value = "";
   updateProviderKeyHint(providerId);
   state.visionUserChanged = false;
   setVisionSupported(Boolean(defaults.visionDefault));
+  refreshModelList(defaults.model || "");
   logEvent(`provider: ${defaults.label}`);
+}
+
+function currentModel() {
+  return modelSelect.value === CUSTOM_MODEL_OPTION ? modelName.value.trim() : modelSelect.value;
+}
+
+function syncCustomModelVisibility() {
+  modelName.classList.toggle("hidden", modelSelect.value !== CUSTOM_MODEL_OPTION);
+}
+
+function setModelOptions(models, selected) {
+  const ids = new Set(models.map((model) => model.id));
+  const options = models.map((model) => makeOption(model.id, model.label || model.id));
+  if (selected && !ids.has(selected)) {
+    options.unshift(makeOption(selected, selected));
+  }
+  options.push(makeOption(CUSTOM_MODEL_OPTION, "Custom..."));
+  modelSelect.replaceChildren(...options);
+  modelSelect.value = selected || options[0].value;
+  if (modelSelect.value === CUSTOM_MODEL_OPTION && selected !== CUSTOM_MODEL_OPTION) {
+    modelSelect.value = options[0].value;
+  }
+  syncCustomModelVisibility();
+}
+
+function makeOption(value, label) {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  return option;
+}
+
+async function refreshModelList(selected) {
+  const fallback = selected || state.providerDefaults.get(providerSelect.value)?.model || "";
+  setModelOptions([], fallback);
+
+  try {
+    const response = await fetch("/api/models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: providerSelect.value,
+        apiBaseUrl: apiBaseUrl.value.trim(),
+        apiKey: apiKeyInput.value.trim(),
+      }),
+    });
+    const payload = await response.json();
+
+    if (payload.models?.length) {
+      setModelOptions(payload.models, fallback);
+      logEvent(`models: ${payload.models.length} available`);
+    } else if (payload.error) {
+      logEvent(`model list unavailable: ${payload.error}`, "warn");
+    }
+  } catch {
+    logEvent("model list request failed; type a model id via Custom...", "warn");
+  }
 }
 
 function updateProviderKeyHint(providerId) {
@@ -214,13 +289,14 @@ function installControls() {
 
   colorInput.addEventListener("input", () => setColor(colorInput.value));
   brushSize.addEventListener("input", () => setBrush(Number(brushSize.value)));
-  providerSelect.addEventListener("change", () => {
-    applyProviderDefaults(providerSelect.value);
-  });
+  providerSelect.addEventListener("change", () => applyProviderDefaults(providerSelect.value));
+  modelSelect.addEventListener("change", syncCustomModelVisibility);
+  apiBaseUrl.addEventListener("change", () => refreshModelList(currentModel()));
+  apiKeyInput.addEventListener("change", () => refreshModelList(currentModel()));
   useVision.addEventListener("change", () => {
     state.visionUserChanged = true;
   });
-  undoBtn.addEventListener("click", undo);
+  undoBtn.addEventListener("click", () => undo());
   clearBtn.addEventListener("click", () => resetAgentSession({ clear: true }));
   exportBtn.addEventListener("click", exportPng);
   startAgentBtn.addEventListener("click", startAgent);
@@ -259,6 +335,8 @@ function installControls() {
   });
 }
 
+// --- Manual painting ---------------------------------------------------
+
 function installManualDrawing() {
   canvas.addEventListener("pointerdown", (event) => {
     const point = getCanvasPoint(event);
@@ -284,10 +362,9 @@ function installManualDrawing() {
     state.isDrawing = true;
     state.startPoint = point;
     state.lastPoint = point;
-    state.currentPoints = [point];
 
     if (state.tool === "pencil" || state.tool === "eraser") {
-      drawSegment(ctx, point, point, getActiveStrokeStyle());
+      drawSegment(point, point);
     }
   });
 
@@ -297,9 +374,8 @@ function installManualDrawing() {
     if (!state.isDrawing) return;
 
     if (state.tool === "pencil" || state.tool === "eraser") {
-      drawSegment(ctx, state.lastPoint, point, getActiveStrokeStyle());
+      drawSegment(state.lastPoint, point);
       state.lastPoint = point;
-      state.currentPoints.push(point);
       return;
     }
 
@@ -319,23 +395,40 @@ function finishPointerDrawing(event) {
   state.isDrawing = false;
   clearPreview();
 
+  ctx.save();
+  applyStrokeStyle(ctx);
   if (state.tool === "line") {
-    drawLine(state.startPoint.x, state.startPoint.y, point.x, point.y);
+    ctx.beginPath();
+    ctx.moveTo(state.startPoint.x, state.startPoint.y);
+    ctx.lineTo(point.x, point.y);
+    ctx.stroke();
   } else if (state.tool === "rect") {
-    drawRectFromPoints(state.startPoint, point, false);
+    const rect = rectFromPoints(state.startPoint, point);
+    ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
   } else if (state.tool === "ellipse") {
-    drawEllipseFromPoints(state.startPoint, point, false);
+    const rect = rectFromPoints(state.startPoint, point);
+    ctx.beginPath();
+    ctx.ellipse(
+      rect.x + rect.w / 2,
+      rect.y + rect.h / 2,
+      Math.max(1, rect.w / 2),
+      Math.max(1, rect.h / 2),
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.stroke();
   }
+  ctx.restore();
 
   state.startPoint = null;
   state.lastPoint = null;
-  state.currentPoints = [];
 }
 
 function drawPreviewShape(start, end) {
   clearPreview();
   previewCtx.save();
-  applyStrokeStyle(previewCtx, getActiveStrokeStyle());
+  applyStrokeStyle(previewCtx);
   previewCtx.setLineDash([5, 5]);
 
   if (state.tool === "line") {
@@ -390,81 +483,23 @@ function setBrush(size) {
   brushOutput.textContent = `${state.brushSize} px`;
 }
 
-function getActiveStrokeStyle() {
-  return {
-    color: state.tool === "eraser" ? "#ffffff" : state.color,
-    size: state.brushSize,
-  };
-}
-
-function applyStrokeStyle(targetCtx, style) {
-  targetCtx.strokeStyle = style.color;
-  targetCtx.fillStyle = style.color;
-  targetCtx.lineWidth = style.size;
+function applyStrokeStyle(targetCtx) {
+  const color = state.tool === "eraser" ? "#ffffff" : state.color;
+  targetCtx.strokeStyle = color;
+  targetCtx.fillStyle = color;
+  targetCtx.lineWidth = state.brushSize;
   targetCtx.lineCap = "round";
   targetCtx.lineJoin = "round";
 }
 
-function drawSegment(targetCtx, from, to, style = { color: state.color, size: state.brushSize }) {
-  targetCtx.save();
-  applyStrokeStyle(targetCtx, style);
-  targetCtx.beginPath();
-  targetCtx.moveTo(from.x, from.y);
-  targetCtx.lineTo(to.x, to.y);
-  targetCtx.stroke();
-  targetCtx.restore();
-}
-
-function drawLine(x1, y1, x2, y2) {
-  drawSegment(ctx, { x: x1, y: y1 }, { x: x2, y: y2 });
-}
-
-function drawRect(x, y, w, h, fill = false) {
+function drawSegment(from, to) {
   ctx.save();
-  applyStrokeStyle(ctx, { color: state.color, size: state.brushSize });
-  if (fill) {
-    ctx.fillRect(x, y, w, h);
-  } else {
-    ctx.strokeRect(x, y, w, h);
-  }
-  ctx.restore();
-}
-
-function drawRectFromPoints(start, end, fill) {
-  const rect = rectFromPoints(start, end);
-  drawRect(rect.x, rect.y, rect.w, rect.h, fill);
-}
-
-function drawEllipse(x, y, rx, ry, fill = false) {
-  ctx.save();
-  applyStrokeStyle(ctx, { color: state.color, size: state.brushSize });
+  applyStrokeStyle(ctx);
   ctx.beginPath();
-  ctx.ellipse(x, y, Math.max(1, rx), Math.max(1, ry), 0, 0, Math.PI * 2);
-  if (fill) ctx.fill();
-  else ctx.stroke();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
   ctx.restore();
-}
-
-function drawPath(segments, fill = false) {
-  ctx.save();
-  applyStrokeStyle(ctx, { color: state.color, size: state.brushSize });
-  ctx.fillStyle = state.color;
-  ctx.beginPath();
-  for (const [command, ...coords] of segments) {
-    if (command === "M") ctx.moveTo(coords[0], coords[1]);
-    else if (command === "L") ctx.lineTo(coords[0], coords[1]);
-    else if (command === "C") ctx.bezierCurveTo(coords[0], coords[1], coords[2], coords[3], coords[4], coords[5]);
-    else if (command === "Q") ctx.quadraticCurveTo(coords[0], coords[1], coords[2], coords[3]);
-    else if (command === "Z") ctx.closePath();
-  }
-  if (fill) ctx.fill();
-  else ctx.stroke();
-  ctx.restore();
-}
-
-function drawEllipseFromPoints(start, end, fill) {
-  const rect = rectFromPoints(start, end);
-  drawEllipse(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2, rect.h / 2, fill);
 }
 
 function drawText(x, y, text, size) {
@@ -472,16 +507,20 @@ function drawText(x, y, text, size) {
   ctx.fillStyle = state.color;
   ctx.font = `${clampInt(size, 8, 96, 22)}px Arial, sans-serif`;
   ctx.textBaseline = "top";
-  ctx.fillText(String(text).slice(0, 80), x, y);
+  ctx.fillText(
+    String(text)
+      .replace(/\p{Cc}/gu, "")
+      .slice(0, 80),
+    x,
+    y,
+  );
   ctx.restore();
 }
 
 function rectFromPoints(start, end) {
-  const x = Math.min(start.x, end.x);
-  const y = Math.min(start.y, end.y);
   return {
-    x,
-    y,
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
     w: Math.abs(end.x - start.x),
     h: Math.abs(end.y - start.y),
   };
@@ -495,8 +534,7 @@ function saveUndo() {
 function undo(count = 1) {
   let steps = clampInt(count, 1, 8, 1);
   while (steps > 0 && state.undoStack.length > 0) {
-    const image = state.undoStack.pop();
-    ctx.putImageData(image, 0, 0);
+    ctx.putImageData(state.undoStack.pop(), 0, 0);
     steps -= 1;
   }
 }
@@ -570,294 +608,121 @@ function hexToRgba(color) {
   ];
 }
 
+// --- Agent SVG painting ------------------------------------------------
+
 function publishAgentApi() {
   window.paintAgent = {
-    setColor,
-    setBrushSize: setBrush,
-    stroke(points) {
-      return enqueueCommand({ type: "stroke", points });
-    },
-    line(x1, y1, x2, y2) {
-      return enqueueCommand({ type: "line", x1, y1, x2, y2 });
-    },
-    rect(x, y, w, h, options = {}) {
-      return enqueueCommand({ type: "rect", x, y, w, h, fill: Boolean(options.fill) });
-    },
-    ellipse(x, y, rx, ry, options = {}) {
-      return enqueueCommand({ type: "ellipse", x, y, rx, ry, fill: Boolean(options.fill) });
-    },
-    circle(x, y, r, options = {}) {
-      return enqueueCommand({ type: "circle", x, y, r, fill: Boolean(options.fill) });
-    },
-    path(d, options = {}) {
-      return enqueueCommand({ type: "path", d, fill: Boolean(options.fill) });
-    },
-    fill(x, y) {
-      return enqueueCommand({ type: "fill", x, y });
-    },
-    text(x, y, text, size = 22) {
-      return enqueueCommand({ type: "text", x, y, text, size });
-    },
-    clear() {
-      clearCanvas(true);
-    },
+    svg: (markup) => enqueueSvgElement(String(markup)),
+    clear: () => clearCanvas(true),
     undo,
     exportPng,
     snapshot: captureCanvasFeedback,
   };
 }
 
-function enqueueCommand(command, source = "manual") {
-  const sanitized = sanitizeClientCommand(command);
-  if (!sanitized) return Promise.resolve(false);
-  state.commandQueue.push({ command: sanitized, source });
-  runCommandQueue();
-  return Promise.resolve(true);
+function enqueueSvgElement(markup) {
+  const sanitized = sanitizeSvgMarkup(markup);
+  if (!sanitized) {
+    logEvent("blocked unsafe or malformed SVG element", "warn");
+    return false;
+  }
+  state.elementQueue.push(sanitized);
+  runElementQueue();
+  return true;
 }
 
-async function runCommandQueue() {
+async function runElementQueue() {
   if (state.queueRunning) return;
   state.queueRunning = true;
 
-  while (state.commandQueue.length > 0) {
-    const item = state.commandQueue.shift();
-    await executeCommand(item.command, item.source);
+  while (state.elementQueue.length > 0) {
+    const markup = state.elementQueue.shift();
+    saveUndo();
+    rememberAgentElement(markup);
+    try {
+      await paintSvgElement(markup);
+    } catch {
+      logEvent("element failed to render", "warn");
+    }
+    await delay(110);
   }
 
   state.queueRunning = false;
   maybeContinueAgent();
 }
 
-async function executeCommand(command, source) {
-  if (source === "agent" && command.type !== "batchEnd") {
-    rememberAgentCommand(command);
+// Parse with a real XML parser, drop anything outside the allowlist, strip
+// event handlers and external references, and return serialized markup.
+function sanitizeSvgMarkup(markup) {
+  const doc = new DOMParser().parseFromString(
+    `<svg xmlns="${SVG_NS}">${markup}</svg>`,
+    "image/svg+xml",
+  );
+  if (doc.querySelector("parsererror")) return null;
+
+  const root = doc.documentElement;
+  for (const el of [...root.querySelectorAll("*")]) {
+    if (!ALLOWED_SVG_TAGS.has(el.localName)) {
+      el.remove();
+      continue;
+    }
+    for (const attr of [...el.attributes]) {
+      const name = attr.name.toLowerCase();
+      const value = attr.value.trim();
+      if (name.startsWith("on") || /javascript:/i.test(value)) {
+        el.removeAttribute(attr.name);
+      } else if ((name === "href" || name.endsWith(":href")) && !value.startsWith("#")) {
+        el.removeAttribute(attr.name);
+      } else if (/url\s*\(/i.test(value) && !/url\s*\(\s*["']?#/i.test(value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
   }
 
-  if (command.type === "setColor") {
-    setColor(command.color);
-    return;
+  const serializer = new XMLSerializer();
+  for (const def of root.querySelectorAll("linearGradient, radialGradient, symbol")) {
+    if (def.id) {
+      state.svgDefsById.set(def.id, serializer.serializeToString(def));
+      if (state.svgDefsById.size > 80) {
+        state.svgDefsById.delete(state.svgDefsById.keys().next().value);
+      }
+    }
   }
 
-  if (command.type === "setBrush") {
-    setBrush(command.size);
-    return;
-  }
-
-  if (command.type === "batchEnd") {
-    state.continueRequested = command.continue;
-    if (command.note) logEvent(`batch: ${command.note}`);
-    return;
-  }
-
-  if (source === "agent") {
-    saveUndo();
-  }
-
-  if (command.type === "stroke") {
-    await animateStroke(command.points);
-  } else if (command.type === "path") {
-    drawPath(command.d, command.fill);
-    await delay(90);
-  } else if (command.type === "line") {
-    await animateLine(command.x1, command.y1, command.x2, command.y2);
-  } else if (command.type === "rect") {
-    drawRect(command.x, command.y, command.w, command.h, command.fill);
-    await delay(90);
-  } else if (command.type === "ellipse") {
-    drawEllipse(command.x, command.y, command.rx, command.ry, command.fill);
-    await delay(90);
-  } else if (command.type === "circle") {
-    drawEllipse(command.x, command.y, command.r, command.r, command.fill);
-    await delay(90);
-  } else if (command.type === "fill") {
-    floodFill(command.x, command.y, hexToRgba(state.color));
-    await delay(90);
-  } else if (command.type === "text") {
-    drawText(command.x, command.y, command.text, command.size);
-    await delay(90);
-  } else if (command.type === "undo") {
-    undo(command.count);
-    await delay(90);
-  }
+  const result = [...root.childNodes].map((node) => serializer.serializeToString(node)).join("");
+  return result.trim() || null;
 }
 
-async function animateStroke(points) {
-  for (let index = 1; index < points.length; index += 1) {
-    const from = { x: points[index - 1][0], y: points[index - 1][1] };
-    const to = { x: points[index][0], y: points[index][1] };
-    drawSegment(ctx, from, to, { color: state.color, size: state.brushSize });
-    await delay(12);
-  }
+function paintSvgElement(markup) {
+  const defs = state.svgDefsById.size
+    ? `<defs>${[...state.svgDefsById.values()].join("")}</defs>`
+    : "";
+  const svg = `<svg xmlns="${SVG_NS}" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${canvas.width} ${canvas.height}">${defs}${markup}</svg>`;
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  return loadImage(url)
+    .then((image) => {
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    })
+    .finally(() => URL.revokeObjectURL(url));
 }
 
-async function animateLine(x1, y1, x2, y2) {
-  const steps = 18;
-  let previous = { x: x1, y: y1 };
-  for (let step = 1; step <= steps; step += 1) {
-    const next = {
-      x: x1 + ((x2 - x1) * step) / steps,
-      y: y1 + ((y2 - y1) * step) / steps,
-    };
-    drawSegment(ctx, previous, next, { color: state.color, size: state.brushSize });
-    previous = next;
-    await delay(10);
-  }
+function rememberAgentElement(markup) {
+  const snippet =
+    markup.length > ELEMENT_SNIPPET_LIMIT ? `${markup.slice(0, ELEMENT_SNIPPET_LIMIT)}...` : markup;
+  state.recentElements.push(snippet);
+  state.elementHistory.push(snippet);
+
+  if (state.recentElements.length > RECENT_ELEMENT_LIMIT) state.recentElements.shift();
+  if (state.elementHistory.length > ELEMENT_HISTORY_LIMIT) state.elementHistory.shift();
 }
 
-function sanitizeClientCommand(raw) {
-  if (!raw || typeof raw !== "object") return null;
-  const type = String(raw.type || "");
-
-  if (type === "setColor") {
-    const color = normalizeHex(raw.color);
-    return color ? { type, color } : null;
-  }
-
-  if (type === "setBrush") {
-    return { type, size: clampInt(raw.size, 1, 60, 4) };
-  }
-
-  if (type === "stroke" && Array.isArray(raw.points) && raw.points.length >= 2) {
-    return {
-      type,
-      points: raw.points.slice(0, 160).map((point) => [
-        clampNumber(point?.[0], 0, canvas.width, 0),
-        clampNumber(point?.[1], 0, canvas.height, 0),
-      ]),
-    };
-  }
-
-  if (type === "path") {
-    const d = clampPathSegments(raw.d);
-    return d ? { type, d, fill: Boolean(raw.fill) } : null;
-  }
-
-  if (type === "line") {
-    return {
-      type,
-      x1: clampNumber(raw.x1, 0, canvas.width, 0),
-      y1: clampNumber(raw.y1, 0, canvas.height, 0),
-      x2: clampNumber(raw.x2, 0, canvas.width, 0),
-      y2: clampNumber(raw.y2, 0, canvas.height, 0),
-    };
-  }
-
-  if (type === "rect") {
-    const rect = normalizeRect(raw.x, raw.y, raw.w, raw.h);
-    return { type, ...rect, fill: Boolean(raw.fill) };
-  }
-
-  if (type === "ellipse") {
-    return {
-      type,
-      x: clampNumber(raw.x, 0, canvas.width, canvas.width / 2),
-      y: clampNumber(raw.y, 0, canvas.height, canvas.height / 2),
-      rx: clampNumber(raw.rx, 1, canvas.width / 2, 20),
-      ry: clampNumber(raw.ry, 1, canvas.height / 2, 20),
-      fill: Boolean(raw.fill),
-    };
-  }
-
-  if (type === "circle") {
-    return {
-      type,
-      x: clampNumber(raw.x, 0, canvas.width, canvas.width / 2),
-      y: clampNumber(raw.y, 0, canvas.height, canvas.height / 2),
-      r: clampNumber(raw.r, 1, Math.min(canvas.width, canvas.height) / 2, 20),
-      fill: Boolean(raw.fill),
-    };
-  }
-
-  if (type === "fill") {
-    return {
-      type,
-      x: clampInt(raw.x, 0, canvas.width - 1, 0),
-      y: clampInt(raw.y, 0, canvas.height - 1, 0),
-    };
-  }
-
-  if (type === "text") {
-    return {
-      type,
-      x: clampNumber(raw.x, 0, canvas.width, 0),
-      y: clampNumber(raw.y, 0, canvas.height, 0),
-      text: String(raw.text || "").replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 80),
-      size: clampInt(raw.size, 8, 96, 22),
-    };
-  }
-
-  if (type === "undo") {
-    return { type, count: clampInt(raw.count, 1, 8, 1) };
-  }
-
-  if (type === "batchEnd") {
-    return {
-      type,
-      continue: Boolean(raw.continue),
-      note: String(raw.note || "").slice(0, 160),
-    };
-  }
-
-  return null;
-}
-
-const PATH_SEGMENT_ARITY = { M: 2, L: 2, C: 6, Q: 4, Z: 0 };
-
-function clampPathSegments(raw) {
-  if (!Array.isArray(raw) || raw.length === 0) return null;
-
-  const segments = [];
-  for (const segment of raw.slice(0, 200)) {
-    if (!Array.isArray(segment) || segment.length === 0) continue;
-    const command = String(segment[0] || "").trim().toUpperCase();
-    const arity = PATH_SEGMENT_ARITY[command];
-    if (arity === undefined) continue;
-
-    const coords = segment.slice(1, 1 + arity);
-    if (coords.length < arity) continue;
-
-    const clamped = coords.map((value, index) =>
-      clampNumber(value, 0, index % 2 === 0 ? canvas.width : canvas.height, 0),
-    );
-    segments.push([command, ...clamped]);
-  }
-
-  if (segments.length < 2 || segments[0][0] !== "M") return null;
-  if (!segments.some((segment) => ["L", "C", "Q"].includes(segment[0]))) return null;
-  return segments;
-}
-
-function normalizeRect(x, y, w, h) {
-  let left = clampNumber(x, -canvas.width, canvas.width, 0);
-  let top = clampNumber(y, -canvas.height, canvas.height, 0);
-  let width = clampNumber(w, -canvas.width, canvas.width, 10);
-  let height = clampNumber(h, -canvas.height, canvas.height, 10);
-
-  if (width < 0) {
-    left += width;
-    width = Math.abs(width);
-  }
-  if (height < 0) {
-    top += height;
-    height = Math.abs(height);
-  }
-
-  left = clampNumber(left, 0, canvas.width, 0);
-  top = clampNumber(top, 0, canvas.height, 0);
-
-  return {
-    x: left,
-    y: top,
-    w: clampNumber(width, 1, canvas.width - left, 1),
-    h: clampNumber(height, 1, canvas.height - top, 1),
-  };
-}
+// --- Agent session -----------------------------------------------------
 
 async function startAgent() {
   await ensureSocket();
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
 
-  const hasExistingSession = state.agentSessionStarted && state.agentActionHistory.length > 0;
+  const hasExistingSession = state.agentSessionStarted && state.elementHistory.length > 0;
   const mode = hasExistingSession ? "edit" : "new";
   const prompt = agentPrompt.value.trim();
   const isBlankNewPrompt = mode === "new" && prompt.length === 0;
@@ -887,14 +752,14 @@ async function startAgent() {
       useVision: useVision.checked,
       canvas: await captureCanvasFeedback(useVision.checked),
       reference: state.reference,
-      recentActions: state.recentAgentActions,
-      historyActions: state.agentActionHistory,
+      recentElements: state.recentElements,
+      elementHistory: state.elementHistory,
       promptHistory: state.promptHistory,
       turnBudget: getTurnBudgetPayload(),
     }),
   );
 
-  state.recentAgentActions = [];
+  state.recentElements = [];
 }
 
 async function sendFeedbackStep({ userInitiated = false } = {}) {
@@ -903,7 +768,6 @@ async function sendFeedbackStep({ userInitiated = false } = {}) {
 
   state.agentRunning = true;
   state.agentSessionStarted = true;
-  state.currentTurn = Math.max(0, state.currentTurn);
   if (userInitiated) {
     state.maxTurns = state.currentTurn + clampInt(maxTurns.value, 1, 40, 12);
     state.noProgressTurns = 0;
@@ -920,14 +784,14 @@ async function sendFeedbackStep({ userInitiated = false } = {}) {
       useVision: useVision.checked,
       canvas: await captureCanvasFeedback(useVision.checked),
       reference: state.reference,
-      recentActions: state.recentAgentActions,
-      historyActions: state.agentActionHistory,
+      recentElements: state.recentElements,
+      elementHistory: state.elementHistory,
       promptHistory: state.promptHistory,
       turnBudget: getTurnBudgetPayload(),
     }),
   );
 
-  state.recentAgentActions = [];
+  state.recentElements = [];
 }
 
 function stopAgent() {
@@ -954,9 +818,10 @@ function resetAgentSession({ clear = false } = {}) {
   state.maxTurns = clampInt(maxTurns.value, 1, 40, 12);
   state.noProgressTurns = 0;
   state.creativeRunActive = false;
-  state.recentAgentActions = [];
-  state.agentActionHistory = [];
+  state.recentElements = [];
+  state.elementHistory = [];
   state.promptHistory = [];
+  state.svgDefsById.clear();
   setAgentButtons();
   setStatus(clear ? "New canvas" : "Agent reset");
   logEvent(clear ? "new canvas and agent memory reset" : "agent memory reset");
@@ -996,9 +861,7 @@ function handleSocketMessage(event) {
   if (message.type === "hello") {
     if (message.providers) configureProviders(message.providers);
     if (message.provider && !providerSelect.value) providerSelect.value = message.provider;
-    if (!llamaUrl.value) llamaUrl.value = message.apiBaseUrl || message.llamaServerUrl || "";
-    if (!chatPath.value) chatPath.value = message.chatPath || message.llamaChatPath || "";
-    if (!modelName.value) modelName.value = message.model || "";
+    if (!apiBaseUrl.value) apiBaseUrl.value = message.apiBaseUrl || "";
     updateProviderKeyHint(providerSelect.value);
     setVisionSupported(Boolean(message.visionSupported));
     return;
@@ -1011,28 +874,22 @@ function handleSocketMessage(event) {
     state.continueRequested = true;
     setAgentButtons();
     setStatus(`Turn ${message.turn}: streaming`);
-    logEvent(`model start: ${message.providerLabel || message.provider || "provider"} ${message.endpoint}`);
-    if (message.sampling) {
-      logEvent(
-        `sampling: temp=${message.sampling.temperature}, top_p=${message.sampling.topP}, top_k=${message.sampling.topK}, min_p=${message.sampling.minP}`,
-      );
-    }
+    logEvent(
+      `model start: ${message.model || ""} via ${message.providerLabel || message.provider}`,
+    );
     if (message.usingVision) logEvent("vision feedback included");
     return;
   }
 
-  if (message.type === "agentCommand") {
-    const command = sanitizeClientCommand(message.command);
-    if (!command) {
-      logEvent("ignored invalid command from server", "warn");
-      return;
-    }
-    logEvent(JSON.stringify(command), "command");
-    enqueueCommand(command, "agent");
+  if (message.type === "element") {
+    logEvent(message.markup, "command");
+    enqueueSvgElement(message.markup);
     return;
   }
 
-  if (message.type === "modelText") {
+  if (message.type === "batch") {
+    state.continueRequested = Boolean(message.continue);
+    if (message.note) logEvent(`batch: ${message.note}`);
     return;
   }
 
@@ -1045,13 +902,13 @@ function handleSocketMessage(event) {
     state.modelStreaming = false;
     state.modelDonePending = true;
     state.continueRequested = Boolean(message.continue);
-    state.noProgressTurns = message.commandsThisTurn > 0 ? 0 : state.noProgressTurns + 1;
+    state.noProgressTurns = message.elementsThisTurn > 0 ? 0 : state.noProgressTurns + 1;
     setStatus(
       message.aborted
         ? "Stopped"
-        : `Turn ${message.turn} done: ${message.commandsThisTurn} commands`,
+        : `Turn ${message.turn} done: ${message.elementsThisTurn} elements`,
     );
-    logEvent(`model done: ${message.commandsThisTurn} commands`);
+    logEvent(`model done: ${message.elementsThisTurn} elements`);
     if (message.retriedWithoutVision) {
       logEvent("completed after retrying without screenshots", "warn");
     }
@@ -1124,14 +981,11 @@ function getModelConfig({ blankNewPrompt = false } = {}) {
 
   return {
     provider: providerSelect.value,
-    apiBaseUrl: llamaUrl.value.trim(),
-    chatPath: chatPath.value.trim(),
-    llamaServerUrl: llamaUrl.value.trim(),
-    llamaChatPath: chatPath.value.trim(),
-    model: modelName.value.trim(),
+    apiBaseUrl: apiBaseUrl.value.trim(),
+    model: currentModel(),
     apiKey: apiKeyInput.value.trim(),
     temperature: blankNewPrompt ? sampling.temperature : 0.65,
-    maxTokens: 1400,
+    maxTokens: 2000,
     seed: blankNewPrompt ? randomSeed() : null,
     ...sampling,
   };
@@ -1141,26 +995,20 @@ function getCreativeSamplingConfig(creativity) {
   const value = clampNumber(creativity, 0, 100, 82) / 100;
 
   return {
-    temperature: roundTo(0.85 + value * 0.7, 2),
+    temperature: roundTo(0.85 + value * 0.65, 2),
     topP: roundTo(0.9 + value * 0.09, 3),
-    topK: clampInt(40 + value * 180, 40, 220, 188),
-    minP: roundTo(0.045 - value * 0.035, 3),
-    repeatPenalty: roundTo(1 + value * 0.1, 3),
-    presencePenalty: roundTo(value * 0.45, 3),
-    frequencyPenalty: roundTo(value * 0.25, 3),
-    xtcProbability: roundTo(value * 0.35, 3),
-    xtcThreshold: 0.1,
-    dynatempRange: roundTo(value * 0.25, 3),
-    dynatempExponent: 1,
+    topK: clampInt(40 + value * 160, 40, 200, 168),
+    minP: roundTo(0.05 - value * 0.04, 3),
   };
 }
 
+// --- Canvas feedback ----------------------------------------------------
+
 async function captureCanvasFeedback(includeImage = false) {
-  const stats = summarizeCanvas();
   const payload = {
     width: canvas.width,
     height: canvas.height,
-    stats,
+    stats: summarizeCanvas(),
   };
 
   if (includeImage) {
@@ -1203,11 +1051,9 @@ function summarizeCanvas() {
       maxX = Math.max(maxX, x);
       maxY = Math.max(maxY, y);
 
-      const key = [
-        Math.round(r / 32) * 32,
-        Math.round(g / 32) * 32,
-        Math.round(b / 32) * 32,
-      ].join(",");
+      const key = [Math.round(r / 32) * 32, Math.round(g / 32) * 32, Math.round(b / 32) * 32].join(
+        ",",
+      );
       buckets.set(key, (buckets.get(key) || 0) + 1);
     }
   }
@@ -1287,10 +1133,12 @@ function loadImage(src) {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.addEventListener("load", () => resolve(image));
-    image.addEventListener("error", () => reject(new Error("Could not load reference image.")));
+    image.addEventListener("error", () => reject(new Error("Could not load image.")));
     image.src = src;
   });
 }
+
+// --- UI helpers ----------------------------------------------------------
 
 function setAgentButtons() {
   startAgentBtn.disabled = state.modelStreaming;
@@ -1310,25 +1158,11 @@ function setVisionSupported(supported) {
   }
 }
 
-function rememberAgentCommand(command) {
-  const snapshot = structuredClone(command);
-  state.recentAgentActions.push(snapshot);
-  state.agentActionHistory.push(snapshot);
-
-  if (state.recentAgentActions.length > COMMAND_LOG_LIMIT) {
-    state.recentAgentActions.shift();
-  }
-  if (state.agentActionHistory.length > AGENT_HISTORY_LIMIT) {
-    state.agentActionHistory.shift();
-  }
-}
-
 function rememberPrompt(prompt, mode) {
-  const text = prompt || "(agent chose subject)";
   state.promptHistory.push({
     mode,
     turn: state.currentTurn,
-    prompt: text.slice(0, 240),
+    prompt: (prompt || "(agent chose subject)").slice(0, 240),
   });
 
   if (state.promptHistory.length > PROMPT_HISTORY_LIMIT) {
@@ -1396,7 +1230,5 @@ function randomSeed() {
 function randomNonce() {
   const values = new Uint32Array(2);
   window.crypto.getRandomValues(values);
-  return `${Date.now().toString(36)}-${[...values]
-    .map((value) => value.toString(36))
-    .join("-")}`;
+  return `${Date.now().toString(36)}-${[...values].map((value) => value.toString(36)).join("-")}`;
 }

@@ -23,13 +23,21 @@
       <main class="workspace">
         <aside class="toolbar" aria-label="Paint tools">
           <div class="tool-group" role="group" aria-label="Drawing tools">
-            <button class="tool-button active" type="button" data-tool="pencil" title="Pencil">Pencil</button>
+            <button class="tool-button active" type="button" data-tool="pencil" title="Pencil">
+              Pencil
+            </button>
             <button class="tool-button" type="button" data-tool="line" title="Line">Line</button>
-            <button class="tool-button" type="button" data-tool="rect" title="Rectangle">Rect</button>
-            <button class="tool-button" type="button" data-tool="ellipse" title="Ellipse">Ellipse</button>
+            <button class="tool-button" type="button" data-tool="rect" title="Rectangle">
+              Rect
+            </button>
+            <button class="tool-button" type="button" data-tool="ellipse" title="Ellipse">
+              Ellipse
+            </button>
             <button class="tool-button" type="button" data-tool="fill" title="Fill">Fill</button>
             <button class="tool-button" type="button" data-tool="text" title="Text">Text</button>
-            <button class="tool-button" type="button" data-tool="eraser" title="Eraser">Eraser</button>
+            <button class="tool-button" type="button" data-tool="eraser" title="Eraser">
+              Eraser
+            </button>
           </div>
 
           <div class="tool-group">
@@ -70,26 +78,39 @@
             </label>
             <label class="field">
               <span>API base URL</span>
-              <input id="llamaUrl" type="url" spellcheck="false" />
-            </label>
-            <label class="field compact">
-              <span>chat path</span>
-              <input id="chatPath" type="text" spellcheck="false" />
+              <input id="apiBaseUrl" type="url" spellcheck="false" />
             </label>
             <label class="field compact">
               <span>model</span>
-              <input id="modelName" type="text" spellcheck="false" />
+              <select id="modelSelect"></select>
+              <input
+                id="modelName"
+                type="text"
+                spellcheck="false"
+                class="hidden"
+                placeholder="model id"
+              />
             </label>
             <label class="field compact">
               <span>API key</span>
-              <input id="apiKeyInput" type="password" spellcheck="false" autocomplete="off" placeholder="Uses provider env var if blank" />
+              <input
+                id="apiKeyInput"
+                type="password"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="Uses provider env var if blank"
+              />
             </label>
           </section>
 
           <section class="panel-section">
             <label class="field">
               <span>Prompt</span>
-              <textarea id="agentPrompt" rows="4" placeholder="Blank means the agent chooses what to draw."></textarea>
+              <textarea
+                id="agentPrompt"
+                rows="4"
+                placeholder="Blank means the agent chooses what to draw."
+              ></textarea>
             </label>
             <label class="field">
               <span>Reference image</span>
