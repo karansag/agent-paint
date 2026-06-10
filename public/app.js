@@ -445,6 +445,23 @@ function drawEllipse(x, y, rx, ry, fill = false) {
   ctx.restore();
 }
 
+function drawPath(segments, fill = false) {
+  ctx.save();
+  applyStrokeStyle(ctx, { color: state.color, size: state.brushSize });
+  ctx.fillStyle = state.color;
+  ctx.beginPath();
+  for (const [command, ...coords] of segments) {
+    if (command === "M") ctx.moveTo(coords[0], coords[1]);
+    else if (command === "L") ctx.lineTo(coords[0], coords[1]);
+    else if (command === "C") ctx.bezierCurveTo(coords[0], coords[1], coords[2], coords[3], coords[4], coords[5]);
+    else if (command === "Q") ctx.quadraticCurveTo(coords[0], coords[1], coords[2], coords[3]);
+    else if (command === "Z") ctx.closePath();
+  }
+  if (fill) ctx.fill();
+  else ctx.stroke();
+  ctx.restore();
+}
+
 function drawEllipseFromPoints(start, end, fill) {
   const rect = rectFromPoints(start, end);
   drawEllipse(rect.x + rect.w / 2, rect.y + rect.h / 2, rect.w / 2, rect.h / 2, fill);
@@ -572,6 +589,9 @@ function publishAgentApi() {
     circle(x, y, r, options = {}) {
       return enqueueCommand({ type: "circle", x, y, r, fill: Boolean(options.fill) });
     },
+    path(d, options = {}) {
+      return enqueueCommand({ type: "path", d, fill: Boolean(options.fill) });
+    },
     fill(x, y) {
       return enqueueCommand({ type: "fill", x, y });
     },
@@ -635,6 +655,9 @@ async function executeCommand(command, source) {
 
   if (command.type === "stroke") {
     await animateStroke(command.points);
+  } else if (command.type === "path") {
+    drawPath(command.d, command.fill);
+    await delay(90);
   } else if (command.type === "line") {
     await animateLine(command.x1, command.y1, command.x2, command.y2);
   } else if (command.type === "rect") {
@@ -704,6 +727,11 @@ function sanitizeClientCommand(raw) {
     };
   }
 
+  if (type === "path") {
+    const d = clampPathSegments(raw.d);
+    return d ? { type, d, fill: Boolean(raw.fill) } : null;
+  }
+
   if (type === "line") {
     return {
       type,
@@ -771,6 +799,32 @@ function sanitizeClientCommand(raw) {
   }
 
   return null;
+}
+
+const PATH_SEGMENT_ARITY = { M: 2, L: 2, C: 6, Q: 4, Z: 0 };
+
+function clampPathSegments(raw) {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+
+  const segments = [];
+  for (const segment of raw.slice(0, 200)) {
+    if (!Array.isArray(segment) || segment.length === 0) continue;
+    const command = String(segment[0] || "").trim().toUpperCase();
+    const arity = PATH_SEGMENT_ARITY[command];
+    if (arity === undefined) continue;
+
+    const coords = segment.slice(1, 1 + arity);
+    if (coords.length < arity) continue;
+
+    const clamped = coords.map((value, index) =>
+      clampNumber(value, 0, index % 2 === 0 ? canvas.width : canvas.height, 0),
+    );
+    segments.push([command, ...clamped]);
+  }
+
+  if (segments.length < 2 || segments[0][0] !== "M") return null;
+  if (!segments.some((segment) => ["L", "C", "Q"].includes(segment[0]))) return null;
+  return segments;
 }
 
 function normalizeRect(x, y, w, h) {

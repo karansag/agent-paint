@@ -63,6 +63,7 @@ The model is prompted to emit one JSON object at a time:
 {"type":"setColor","color":"#0f766e"}
 {"type":"setBrush","size":5}
 {"type":"line","x1":120,"y1":180,"x2":260,"y2":180}
+{"type":"path","d":[["M",60,200],["C",100,120,180,120,220,200],["Q",260,260,300,200],["Z"]],"fill":false}
 {"type":"rect","x":150,"y":120,"w":80,"h":60,"fill":false}
 {"type":"batchEnd","continue":true,"note":"add details"}
 ```

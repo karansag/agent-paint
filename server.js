@@ -110,6 +110,7 @@ Available commands:
 {"type":"setColor","color":"#RRGGBB"}
 {"type":"setBrush","size":1}
 {"type":"stroke","points":[[x,y],[x,y],[x,y]]}
+{"type":"path","d":[["M",x,y],["C",cx1,cy1,cx2,cy2,x,y],["Q",cx,cy,x,y],["L",x,y],["Z"]],"fill":false}
 {"type":"line","x1":0,"y1":0,"x2":0,"y2":0}
 {"type":"rect","x":0,"y":0,"w":0,"h":0,"fill":false}
 {"type":"ellipse","x":0,"y":0,"rx":0,"ry":0,"fill":false}
@@ -124,6 +125,7 @@ Good drawing strategy:
 - Prefer clear iconic subjects that read well at canvas scale.
 - Use fill commands only inside closed regions.
 - Use strokes for organic shapes and lines/rectangles/ellipses for geometry.
+- Prefer path with Bezier segments for smooth curves: M moves, L draws a line, C is a cubic Bezier (two control points then the endpoint), Q is a quadratic Bezier (one control point then the endpoint), Z closes the shape. All coordinates are absolute. One path with curves reads better than many tiny straight strokes.
 - Avoid tiny details until the main subject is recognizable.
 - For edit requests, preserve the existing drawing. Do not redraw the whole scene, erase it, paint over it with white, or cover existing objects with large filled shapes unless the user explicitly asks.
 - For blank new requests, choose what to draw yourself. There is no hidden target and no preferred theme.`;
@@ -1035,6 +1037,14 @@ function sanitizeCommand(raw, width, height) {
     return { ok: true, value: { type, points } };
   }
 
+  if (type === "path") {
+    const d = sanitizePathSegments(raw.d, width, height);
+    if (!d) {
+      return { ok: false, reason: "path requires a 'd' array of segments starting with M, e.g. [[\"M\",x,y],[\"C\",...]]." };
+    }
+    return { ok: true, value: { type, d, fill: Boolean(raw.fill) } };
+  }
+
   if (type === "line") {
     return {
       ok: true,
@@ -1124,6 +1134,32 @@ function sanitizeCommand(raw, width, height) {
 
 function isVisibleCommand(command) {
   return !["batchEnd", "setColor", "setBrush"].includes(command.type);
+}
+
+const PATH_SEGMENT_ARITY = { M: 2, L: 2, C: 6, Q: 4, Z: 0 };
+
+function sanitizePathSegments(raw, width, height) {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+
+  const segments = [];
+  for (const segment of raw.slice(0, 200)) {
+    if (!Array.isArray(segment) || segment.length === 0) continue;
+    const command = String(segment[0] || "").trim().toUpperCase();
+    const arity = PATH_SEGMENT_ARITY[command];
+    if (arity === undefined) continue;
+
+    const coords = segment.slice(1, 1 + arity);
+    if (coords.length < arity) continue;
+
+    const clamped = coords.map((value, index) =>
+      clampNumber(value, 0, index % 2 === 0 ? width : height, 0),
+    );
+    segments.push([command, ...clamped]);
+  }
+
+  if (segments.length < 2 || segments[0][0] !== "M") return null;
+  if (!segments.some((segment) => ["L", "C", "Q"].includes(segment[0]))) return null;
+  return segments;
 }
 
 function normalizeRect(x, y, w, h, width, height) {
