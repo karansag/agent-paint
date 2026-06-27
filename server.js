@@ -602,7 +602,7 @@ function buildChatCompletionRequest(config, messages) {
 
 async function resolveStartupConfig() {
   const provider = normalizeProviderId(
-    ENV_PROVIDER || inferProviderFromBaseUrl(ENV_BASE_URL) || "llama",
+    ENV_PROVIDER || inferProviderFromBaseUrl(ENV_BASE_URL) || "openai",
   );
   const definition = getProviderDefinition(provider);
 
