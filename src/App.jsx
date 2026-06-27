@@ -408,10 +408,26 @@ function App() {
   }
 
   function exportPng() {
-    const link = document.createElement("a");
-    link.download = `agent-paint-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
-    link.href = canvasRef.current.toDataURL("image/png");
-    link.click();
+    const exportedAt = new Date().toISOString();
+    const filenameBase = `agent-paint-${exportedAt.replace(/[:.]/g, "-")}`;
+    downloadDataUrl(`${filenameBase}.png`, canvasRef.current.toDataURL("image/png"));
+    downloadJson(`${filenameBase}.json`, createExportMetadata(exportedAt));
+  }
+
+  function createExportMetadata(exportedAt) {
+    const form = formRef.current;
+    const canvas = canvasRef.current;
+    return {
+      prompt: form.prompt.trim(),
+      provider: form.provider,
+      model: form.model,
+      turns: runtimeRef.current.currentTurn,
+      createdAt: exportedAt,
+      canvas: {
+        width: canvas.width,
+        height: canvas.height,
+      },
+    };
   }
 
   function enqueueSvgElement(markup) {
@@ -1118,6 +1134,24 @@ function loadImage(src) {
     image.addEventListener("error", () => reject(new Error("Could not load image.")));
     image.src = src;
   });
+}
+
+function downloadDataUrl(filename, href) {
+  const link = document.createElement("a");
+  link.download = filename;
+  link.href = href;
+  link.click();
+}
+
+function downloadJson(filename, payload) {
+  const url = URL.createObjectURL(
+    new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" }),
+  );
+  try {
+    downloadDataUrl(filename, url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function rgbToHex(r, g, b) {

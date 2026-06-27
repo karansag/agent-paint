@@ -66,6 +66,15 @@ The **Random** button beside the prompt asks the selected provider/model for one
 
 ## Gallery
 
-The gallery page is available at `/gallery`. Add exported images to `public/gallery/` and commit them; when the Node server runs, `/api/gallery` scans that folder and the page displays the images.
+The gallery page is available at `/gallery`. Add exported images to `public/gallery/` and commit them; when the Node server runs, `/api/gallery` scans that folder and the page displays the images. A matching sidecar JSON file with the same basename adds metadata:
 
-Export is browser-side. The app creates a PNG download in your browser, so files land wherever that browser is configured to save downloads. The server does not automatically write exported images into the repo.
+```json
+{
+  "prompt": "Draw a dense city of glass kites at dusk.",
+  "provider": "openai",
+  "model": "gpt-4.1-mini",
+  "turns": 12
+}
+```
+
+Export is browser-side. The app creates PNG and JSON downloads in your browser, so files land wherever that browser is configured to save downloads. The server does not automatically write exported images into the repo.

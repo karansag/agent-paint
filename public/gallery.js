@@ -39,11 +39,34 @@ function renderGallery(images) {
     img.alt = image.name;
     img.loading = "lazy";
 
-    const caption = document.createElement("span");
+    const caption = document.createElement("div");
+    caption.className = "gallery-caption";
     caption.textContent = image.name;
 
-    link.append(img, caption);
-    card.append(link);
+    link.append(img);
+    card.append(link, caption, createMetadataBlock(image.metadata || {}));
     grid.append(card);
   }
+}
+
+function createMetadataBlock(metadata) {
+  const block = document.createElement("dl");
+  block.className = "gallery-metadata";
+
+  const rows = [
+    ["Model", metadata.model || "Unknown"],
+    ["Turns", metadata.turns === 0 || metadata.turns ? String(metadata.turns) : "Unknown"],
+    ["Prompt", metadata.prompt ? metadata.prompt : "(empty prompt)"],
+  ];
+  if (metadata.provider) rows.splice(1, 0, ["Provider", metadata.provider]);
+
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    block.append(dt, dd);
+  }
+
+  return block;
 }

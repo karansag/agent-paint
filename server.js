@@ -227,20 +227,42 @@ function resolvePublicPath(url) {
 async function listGalleryImages() {
   try {
     const entries = await readdir(GALLERY_DIR, { withFileTypes: true });
-    const images = entries
+    const imageNames = entries
       .filter((entry) => entry.isFile())
       .map((entry) => entry.name)
       .filter((name) => GALLERY_EXTENSIONS.has(extname(name).toLowerCase()))
-      .sort((a, b) => b.localeCompare(a))
-      .map((name) => ({
+      .sort((a, b) => b.localeCompare(a));
+    const images = await Promise.all(
+      imageNames.map(async (name) => ({
         name,
         url: `/gallery/${encodeURIComponent(name)}`,
-      }));
+        metadata: await readGalleryMetadata(name),
+      })),
+    );
 
     return { images };
   } catch (error) {
     if (error.code === "ENOENT") return { images: [] };
     throw error;
+  }
+}
+
+async function readGalleryMetadata(imageName) {
+  const sidecar = imageName.slice(0, -extname(imageName).length) + ".json";
+  try {
+    const parsed = JSON.parse(await readFile(join(GALLERY_DIR, sidecar), "utf8"));
+    return {
+      prompt: cleanText(parsed.prompt, 700),
+      provider: cleanText(parsed.provider, 120),
+      model: cleanText(parsed.model, 160),
+      turns:
+        parsed.turns === undefined || parsed.turns === null
+          ? null
+          : clampInt(parsed.turns, 0, 1000, 0),
+      createdAt: cleanText(parsed.createdAt, 120),
+    };
+  } catch {
+    return {};
   }
 }
 
