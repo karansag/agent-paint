@@ -1,5 +1,5 @@
 import http from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
@@ -26,6 +26,7 @@ import { clampNumber, clampInt, optionalNumber, optionalInt, truncate } from "./
 
 const ROOT_DIR = fileURLToPath(new URL(".", import.meta.url));
 const PUBLIC_DIR = join(ROOT_DIR, "public");
+const GALLERY_DIR = join(PUBLIC_DIR, "gallery");
 
 const PORT = Number(process.env.PORT || 5173);
 const ENV_PROVIDER = process.env.LLM_PROVIDER || "";
@@ -43,13 +44,21 @@ const MIME_TYPES = new Map([
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
   [".jpeg", "image/jpeg"],
+  [".gif", "image/gif"],
+  [".webp", "image/webp"],
   [".svg", "image/svg+xml; charset=utf-8"],
 ]);
+const GALLERY_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
 const server = http.createServer(async (req, res) => {
   try {
     if (req.url === "/api/config") {
       sendJson(res, await buildClientConfig());
+      return;
+    }
+
+    if (req.url === "/api/gallery") {
+      sendJson(res, await listGalleryImages());
       return;
     }
 
@@ -192,7 +201,12 @@ async function listProviderModels(input) {
 
 function resolvePublicPath(url) {
   const parsed = new URL(url, "http://localhost");
-  const requestedPath = parsed.pathname === "/" ? "/index.html" : parsed.pathname;
+  const requestedPath =
+    parsed.pathname === "/"
+      ? "/index.html"
+      : parsed.pathname === "/gallery" || parsed.pathname === "/gallery/"
+        ? "/gallery.html"
+        : parsed.pathname;
   const normalized = normalize(decodeURIComponent(requestedPath)).replace(/^(\.\.[/\\])+/, "");
   const filePath = join(PUBLIC_DIR, normalized);
 
@@ -201,6 +215,26 @@ function resolvePublicPath(url) {
   }
 
   return filePath;
+}
+
+async function listGalleryImages() {
+  try {
+    const entries = await readdir(GALLERY_DIR, { withFileTypes: true });
+    const images = entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => GALLERY_EXTENSIONS.has(extname(name).toLowerCase()))
+      .sort((a, b) => b.localeCompare(a))
+      .map((name) => ({
+        name,
+        url: `/gallery/${encodeURIComponent(name)}`,
+      }));
+
+    return { images };
+  } catch (error) {
+    if (error.code === "ENOENT") return { images: [] };
+    throw error;
+  }
 }
 
 function sendJson(res, payload) {

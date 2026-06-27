@@ -61,3 +61,9 @@ The model is prompted to stream SVG elements, nothing else:
 **Send** starts a drawing or, once one exists, sends an edit request (the model is told to preserve the canvas). **Stop** aborts the active run. **New** clears the canvas and the agent's memory.
 
 For blank prompts the model chooses its own subject. The app does not inject subject suggestions.
+
+## Gallery
+
+The gallery page is available at `/gallery`. Add exported images to `public/gallery/` and commit them; when the Node server runs, `/api/gallery` scans that folder and the page displays the images.
+
+Export is browser-side. The app creates a PNG download in your browser, so files land wherever that browser is configured to save downloads. The server does not automatically write exported images into the repo.

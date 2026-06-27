@@ -875,6 +875,9 @@ function App() {
           <span>Agent Paint</span>
         </div>
         <div className="file-actions" aria-label="File actions">
+          <a className="button-link" href="/gallery">
+            Gallery
+          </a>
           <button type="button" title="Export PNG" onClick={exportPng}>
             Export
           </button>

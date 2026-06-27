@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Paint Gallery</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="gallery-page">
+    <div class="gallery-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>Agent Paint Gallery</span>
+        </div>
+        <div class="file-actions" aria-label="Site actions">
+          <a class="button-link" href="/">Paint</a>
+        </div>
+      </header>
+
+      <main class="gallery-main">
+        <div class="gallery-header">
+          <h1>Gallery</h1>
+          <div id="galleryStatus" class="gallery-status" aria-live="polite">Loading images...</div>
+        </div>
+        <section id="galleryGrid" class="gallery-grid" aria-label="Drawn images"></section>
+      </main>
+    </div>
+
+    <script src="/gallery.js" type="module"></script>
+  </body>
+</html>
