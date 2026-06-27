@@ -71,10 +71,11 @@ The gallery page is available at `/gallery`. Add exported images to `public/gall
 ```json
 {
   "prompt": "Draw a dense city of glass kites at dusk.",
+  "author": "karansag",
   "provider": "openai",
   "model": "gpt-4.1-mini",
   "turns": 12
 }
 ```
 
-Export is browser-side. The app creates PNG and JSON downloads in your browser, so files land wherever that browser is configured to save downloads. The server does not automatically write exported images into the repo.
+Export is browser-side. The app creates PNG and JSON downloads in your browser, so files land wherever that browser is configured to save downloads. The server does not automatically write exported images into the repo. The gallery's **Submit Your Image** link opens a `mailto:` to `karan@karansag.org` with subject `agent paint image`; attach the exported files manually.

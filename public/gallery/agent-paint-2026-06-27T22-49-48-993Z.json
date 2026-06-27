@@ -1,5 +1,6 @@
 {
   "prompt": "",
+  "author": "karansag",
   "provider": "OpenAI",
   "model": "GPT 5.5",
   "turns": 12,

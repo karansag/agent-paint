@@ -409,7 +409,7 @@ body.gallery-page {
 
 .gallery-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 14px;
@@ -424,6 +424,12 @@ body.gallery-page {
 .gallery-status {
   color: var(--muted);
   font-size: 13px;
+}
+
+.gallery-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .gallery-grid {
@@ -545,6 +551,11 @@ body.gallery-page {
   }
 
   .gallery-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .gallery-header-actions {
     align-items: flex-start;
     flex-direction: column;
   }

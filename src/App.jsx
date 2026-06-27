@@ -419,6 +419,7 @@ function App() {
     const canvas = canvasRef.current;
     return {
       prompt: form.prompt.trim(),
+      author: "",
       provider: form.provider,
       model: form.model,
       turns: runtimeRef.current.currentTurn,

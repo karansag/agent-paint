@@ -44,7 +44,8 @@ function renderGallery(images) {
     caption.textContent = image.name;
 
     link.append(img);
-    card.append(link, caption, createMetadataBlock(image.metadata || {}));
+    const metadata = image.metadata || {};
+    card.append(link, caption, createMetadataBlock(metadata));
     grid.append(card);
   }
 }
@@ -54,6 +55,7 @@ function createMetadataBlock(metadata) {
   block.className = "gallery-metadata";
 
   const rows = [
+    ["Author", metadata.author || "Unknown"],
     ["Model", metadata.model || "Unknown"],
     ["Turns", metadata.turns === 0 || metadata.turns ? String(metadata.turns) : "Unknown"],
     ["Prompt", metadata.prompt ? metadata.prompt : "(empty prompt)"],

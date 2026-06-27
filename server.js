@@ -253,6 +253,7 @@ async function readGalleryMetadata(imageName) {
     const parsed = JSON.parse(await readFile(join(GALLERY_DIR, sidecar), "utf8"));
     return {
       prompt: cleanText(parsed.prompt, 700),
+      author: cleanText(parsed.author, 120),
       provider: cleanText(parsed.provider, 120),
       model: cleanText(parsed.model, 160),
       turns:
