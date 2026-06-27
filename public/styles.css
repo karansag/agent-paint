@@ -36,6 +36,10 @@ body {
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+#root {
+  min-height: 100%;
+}
+
 button,
 input,
 select,
@@ -116,40 +120,19 @@ button:disabled {
 
 .workspace {
   display: grid;
-  grid-template-columns: 128px minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   min-height: 0;
 }
 
-.toolbar,
 .agent-panel {
   overflow: auto;
-  border-right: 1px solid var(--line-dark);
   background: var(--panel);
 }
 
 .agent-panel {
-  border-right: 0;
   border-left: 1px solid var(--line-dark);
 }
 
-.toolbar {
-  padding: 10px;
-}
-
-.tool-group {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-  margin-bottom: 16px;
-}
-
-.tool-button {
-  width: 100%;
-  text-align: left;
-  padding: 4px 8px;
-}
-
-.control-label,
 .field span {
   display: block;
   margin-bottom: 5px;
@@ -157,40 +140,6 @@ button:disabled {
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
-}
-
-#colorInput {
-  width: 100%;
-  height: 36px;
-  padding: 2px;
-  border: 1px solid var(--line-dark);
-  background: #ffffff;
-}
-
-.swatches {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 5px;
-  min-width: 0;
-}
-
-.swatch {
-  width: 100%;
-  aspect-ratio: 1;
-  min-height: 0;
-  padding: 0;
-  border: 1px solid #374151;
-}
-
-#brushSize {
-  width: 100%;
-}
-
-#brushOutput {
-  display: block;
-  min-height: 18px;
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .canvas-stage {
@@ -227,10 +176,6 @@ canvas {
   height: 100%;
   image-rendering: pixelated;
   touch-action: none;
-}
-
-#previewCanvas {
-  pointer-events: none;
 }
 
 .status-row {
@@ -382,12 +327,11 @@ canvas {
   }
 
   .workspace {
-    grid-template-columns: 96px minmax(0, 1fr);
+    grid-template-columns: 1fr;
     grid-template-rows: minmax(420px, 60vh) auto;
   }
 
   .agent-panel {
-    grid-column: 1 / -1;
     border-left: 0;
     border-top: 1px solid var(--line-dark);
   }
@@ -406,19 +350,7 @@ canvas {
 
   .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(320px, 55vh) auto;
-  }
-
-  .toolbar {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 10px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line-dark);
-  }
-
-  .tool-group {
-    margin-bottom: 0;
+    grid-template-rows: minmax(320px, 55vh) auto;
   }
 
   .canvas-stage {
