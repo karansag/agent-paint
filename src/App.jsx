@@ -79,7 +79,6 @@ function initialRuntime() {
     continueRequested: true,
     currentTurn: 0,
     maxTurns: 12,
-    creativeRunActive: false,
     noProgressTurns: 0,
     agentSessionStarted: false,
     recentElements: [],
@@ -113,7 +112,6 @@ function App() {
   const [useVision, setUseVision] = useState(false);
   const [visionSupported, setVisionSupportedState] = useState(false);
   const [maxTurns, setMaxTurns] = useState(12);
-  const [creativity, setCreativity] = useState(82);
   const [status, setStatus] = useState("Idle");
   const [logs, setLogs] = useState([]);
   const [ui, setUi] = useState({
@@ -146,7 +144,6 @@ function App() {
     autoLoop,
     useVision,
     maxTurns,
-    creativity,
   };
 
   useEffect(() => {
@@ -502,11 +499,6 @@ function App() {
     const cleanPrompt = form.prompt.trim();
     const isBlankNewPrompt = mode === "new" && cleanPrompt.length === 0;
 
-    runtime.creativeRunActive = isBlankNewPrompt
-      ? true
-      : cleanPrompt.length > 0
-        ? false
-        : runtime.creativeRunActive;
     runtime.maxTurns = runtime.currentTurn + clampInt(form.maxTurns, 1, 40, 12);
     runtime.noProgressTurns = 0;
     runtime.agentSessionStarted = true;
@@ -525,7 +517,7 @@ function App() {
         mode,
         prompt: cleanPrompt,
         choiceNonce: isBlankNewPrompt ? randomNonce() : "",
-        config: getModelConfig({ blankNewPrompt: isBlankNewPrompt }),
+        config: getModelConfig(),
         useVision: form.useVision,
         canvas: await captureCanvasFeedback(form.useVision),
         reference: form.reference,
@@ -539,16 +531,12 @@ function App() {
     runtime.recentElements = [];
   }
 
-  async function sendFeedbackStep({ userInitiated = false } = {}) {
+  async function sendFeedbackStep() {
     await ensureSocket();
     const runtime = runtimeRef.current;
     if (!runtime.ws || runtime.ws.readyState !== WebSocket.OPEN || runtime.modelStreaming) return;
 
     const form = formRef.current;
-    if (userInitiated) {
-      runtime.maxTurns = runtime.currentTurn + clampInt(form.maxTurns, 1, 40, 12);
-      runtime.noProgressTurns = 0;
-    }
     runtime.agentSessionStarted = true;
     patchRuntime({ agentRunning: true });
     logEvent("sending feedback step");
@@ -558,7 +546,7 @@ function App() {
         type: "feedback",
         mode: "continue",
         prompt: form.prompt,
-        config: getModelConfig({ blankNewPrompt: runtime.creativeRunActive }),
+        config: getModelConfig(),
         useVision: form.useVision,
         canvas: await captureCanvasFeedback(form.useVision),
         reference: form.reference,
@@ -574,7 +562,6 @@ function App() {
 
   function stopAgent() {
     const runtime = runtimeRef.current;
-    runtime.creativeRunActive = false;
     runtime.noProgressTurns = 0;
     if (runtime.ws?.readyState === WebSocket.OPEN) {
       runtime.ws.send(JSON.stringify({ type: "stop" }));
@@ -599,7 +586,6 @@ function App() {
       currentTurn: 0,
       maxTurns: clampInt(formRef.current.maxTurns, 1, 40, 12),
       noProgressTurns: 0,
-      creativeRunActive: false,
       recentElements: [],
       elementHistory: [],
       promptHistory: [],
@@ -770,24 +756,15 @@ function App() {
     };
   }
 
-  function getModelConfig({ blankNewPrompt = false } = {}) {
+  function getModelConfig() {
     const form = formRef.current;
-    const sampling = blankNewPrompt ? getCreativeSamplingConfig(form.creativity) : {};
-    const config = {
+    return {
       provider: form.provider,
       apiBaseUrl: form.apiBaseUrl.trim(),
       model: form.model,
       apiKey: form.apiKey.trim(),
       maxTokens: 2000,
-      seed: blankNewPrompt ? randomSeed() : null,
     };
-
-    if (form.provider === "llama") {
-      config.temperature = blankNewPrompt ? sampling.temperature : 0.65;
-      Object.assign(config, sampling);
-    }
-
-    return config;
   }
 
   async function captureCanvasFeedback(includeImage = false) {
@@ -898,12 +875,6 @@ function App() {
           <span>Agent Paint</span>
         </div>
         <div className="file-actions" aria-label="File actions">
-          <button type="button" title="Undo" onClick={() => undo()}>
-            Undo
-          </button>
-          <button type="button" title="Clear canvas" onClick={() => resetAgentSession({ clear: true })}>
-            Clear
-          </button>
           <button type="button" title="Export PNG" onClick={exportPng}>
             Export
           </button>
@@ -923,7 +894,20 @@ function App() {
 
         <aside className="agent-panel" aria-label="Agent controls">
           <section className="panel-section">
-            <h1>Agent</h1>
+            <div className="panel-heading">
+              <h1>Agent</h1>
+              <div className="panel-actions" aria-label="Agent actions">
+                <button className="primary" type="button" disabled={ui.modelStreaming} onClick={startAgent}>
+                  Send
+                </button>
+                <button type="button" disabled={!ui.agentRunning && !ui.modelStreaming} onClick={stopAgent}>
+                  Stop
+                </button>
+                <button type="button" disabled={ui.modelStreaming} onClick={() => resetAgentSession({ clear: true })}>
+                  New
+                </button>
+              </div>
+            </div>
             <label className="field compact">
               <span>provider</span>
               <select value={provider} onChange={(event) => handleProviderChange(event.target.value)}>
@@ -1031,33 +1015,8 @@ function App() {
                 onChange={(event) => setMaxTurns(clampInt(event.target.value, 1, 40, 12))}
               />
             </label>
-            <label className="field compact">
-              <span>creativity</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={creativity}
-                onChange={(event) => setCreativity(clampInt(event.target.value, 0, 100, 82))}
-              />
-              <output>{creativity}</output>
-            </label>
           </section>
 
-          <section className="agent-actions" aria-label="Agent actions">
-            <button className="primary" type="button" disabled={ui.modelStreaming} onClick={startAgent}>
-              Send
-            </button>
-            <button type="button" disabled={ui.modelStreaming} onClick={() => resetAgentSession({ clear: true })}>
-              New
-            </button>
-            <button type="button" disabled={ui.modelStreaming} onClick={() => sendFeedbackStep({ userInitiated: true })}>
-              Step
-            </button>
-            <button type="button" disabled={!ui.agentRunning && !ui.modelStreaming} onClick={stopAgent}>
-              Stop
-            </button>
-          </section>
 
           <section className="panel-section log-section">
             <h2>Stream</h2>
@@ -1073,16 +1032,6 @@ function App() {
       </main>
     </div>
   );
-}
-
-function getCreativeSamplingConfig(creativity) {
-  const value = clampNumber(creativity, 0, 100, 82) / 100;
-  return {
-    temperature: roundTo(0.85 + value * 0.65, 2),
-    topP: roundTo(0.9 + value * 0.09, 3),
-    topK: clampInt(40 + value * 160, 40, 200, 168),
-    minP: roundTo(0.05 - value * 0.04, 3),
-  };
 }
 
 async function canvasToDataUrl(source, maxSize, quality) {
@@ -1143,9 +1092,6 @@ function randomNonce() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function randomSeed() {
-  return Math.floor(Math.random() * 4_294_967_295);
-}
 
 function clampNumber(value, min, max, fallback = min) {
   const number = Number(value);
@@ -1157,10 +1103,6 @@ function clampInt(value, min, max, fallback = min) {
   return Math.round(clampNumber(value, min, max, fallback));
 }
 
-function roundTo(value, decimals) {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-}
 
 function delay(ms) {
   return new Promise((resolve) => {

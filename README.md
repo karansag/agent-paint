@@ -35,7 +35,7 @@ Recognized variables: `PORT`, `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_
 
 The model field is a dropdown populated live from the provider (`/v1/models` for llama.cpp/OpenAI/custom, the native models API for Anthropic), with a `Custom...` option for typing an arbitrary model id. The list refreshes when you change provider, base URL, or API key.
 
-The bridge sends only provider-safe sampling parameters: llama.cpp gets `temperature`, `seed`, `top_p`, `top_k`, and `min_p`; OpenAI gets `seed`; Claude gets no sampling params. Hosted OpenAI and Anthropic requests do not include `temperature`.
+The UI does not expose sampling controls. Hosted OpenAI and Anthropic requests do not include `temperature`, `top_p`, `top_k`, or `min_p`.
 
 ## Drawing protocol
 
@@ -58,6 +58,6 @@ The model is prompted to stream SVG elements, nothing else:
 
 ## Iteration
 
-**Send** starts a drawing or, once one exists, sends an edit request (the model is told to preserve the canvas). **Step** forces one more pass, **Stop** aborts, **New** clears the canvas and the agent's memory.
+**Send** starts a drawing or, once one exists, sends an edit request (the model is told to preserve the canvas). **Stop** aborts the active run. **New** clears the canvas and the agent's memory.
 
-For blank prompts the model chooses its own subject. With local llama.cpp, the creativity slider shapes sampling (`temperature`, top-p, top-k, min-p, fresh random seed). Hosted OpenAI and Claude runs keep provider-safe request defaults and never receive injected subject suggestions.
+For blank prompts the model chooses its own subject. The app does not inject subject suggestions.

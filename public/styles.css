@@ -48,12 +48,16 @@ textarea {
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 32px;
   border: 1px solid var(--line-dark);
   border-radius: 4px;
   background: linear-gradient(#ffffff, #e5e7eb);
   color: var(--text);
   cursor: pointer;
+  padding: 4px 10px;
 }
 
 button:hover {
@@ -219,6 +223,26 @@ canvas {
   font-size: 13px;
 }
 
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.panel-heading h1 {
+  margin: 0;
+}
+
+.panel-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(54px, 1fr));
+  flex: 1;
+  max-width: 220px;
+  gap: 6px;
+}
+
 .field {
   display: block;
   margin-bottom: 10px;
@@ -255,13 +279,6 @@ canvas {
 .options label {
   color: #1f2937;
   font-size: 13px;
-}
-
-.agent-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
-  gap: 6px;
-  margin-bottom: 12px;
 }
 
 .reference-preview {
@@ -355,5 +372,14 @@ canvas {
 
   .canvas-stage {
     padding: 10px;
+  }
+
+  .panel-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .panel-actions {
+    max-width: none;
   }
 }
