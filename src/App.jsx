@@ -99,10 +99,10 @@ function App() {
   const formRef = useRef(null);
 
   const [providers, setProviders] = useState(fallbackProviders);
-  const [provider, setProvider] = useState("llama");
-  const [apiBaseUrl, setApiBaseUrl] = useState("http://127.0.0.1:8081");
+  const [provider, setProvider] = useState("openai");
+  const [apiBaseUrl, setApiBaseUrl] = useState("https://api.openai.com/v1");
   const [models, setModels] = useState([]);
-  const [selectedModel, setSelectedModel] = useState("gemma-4-26B-A4B-it-Q4_K_M.gguf");
+  const [selectedModel, setSelectedModel] = useState("gpt-4.1-mini");
   const [customModel, setCustomModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -110,7 +110,7 @@ function App() {
   const [reference, setReference] = useState(null);
   const [referencePreview, setReferencePreview] = useState("");
   const [autoLoop, setAutoLoop] = useState(true);
-  const [useVision, setUseVision] = useState(false);
+  const [useVision, setUseVision] = useState(true);
   const [visionSupported, setVisionSupportedState] = useState(false);
   const [maxTurns, setMaxTurns] = useState(12);
   const [status, setStatus] = useState("Idle");
@@ -211,7 +211,7 @@ function App() {
         : fallbackProviders();
     setProviderList(nextProviders);
 
-    const nextProvider = config.provider || "llama";
+    const nextProvider = config.provider || "openai";
     const defaults = nextProviders.find((item) => item.id === nextProvider) || nextProviders[0] || {};
     const nextBaseUrl = config.apiBaseUrl || defaults.apiBaseUrl || "http://127.0.0.1:8081";
     const nextModel = config.model || defaults.model || "";
@@ -894,14 +894,21 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
-          <span>Agent Paint</span>
+        <div className="topbar-left">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true" />
+            <span>Agent Paint</span>
+          </div>
+          <nav className="nav-tabs" aria-label="Primary">
+            <a className="nav-tab active" href="/">
+              Paint
+            </a>
+            <a className="nav-tab" href="/gallery">
+              Gallery
+            </a>
+          </nav>
         </div>
         <div className="file-actions" aria-label="File actions">
-          <a className="button-link" href="/gallery">
-            Gallery
-          </a>
           <button type="button" title="Export PNG" onClick={exportPng}>
             Export
           </button>

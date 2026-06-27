@@ -102,6 +102,13 @@ button:disabled {
   padding: 6px 10px;
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 16px;
+}
+
 .brand {
   display: inline-flex;
   align-items: center;
@@ -123,6 +130,36 @@ button:disabled {
 .file-actions {
   display: flex;
   gap: 6px;
+}
+
+.nav-tabs {
+  display: inline-flex;
+  align-self: stretch;
+  align-items: center;
+  gap: 2px;
+}
+
+.nav-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--muted);
+  padding: 4px 10px;
+  text-decoration: none;
+}
+
+.nav-tab:hover {
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.nav-tab.active {
+  border-color: var(--line-dark);
+  background: #ffffff;
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .workspace {
@@ -451,6 +488,12 @@ body.gallery-page {
     align-items: stretch;
     flex-direction: column;
     height: auto;
+  }
+
+  .topbar-left {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .app-shell {
