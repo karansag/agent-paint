@@ -62,6 +62,8 @@ The model is prompted to stream SVG elements, nothing else:
 
 For blank prompts the model chooses its own subject. The app does not inject subject suggestions.
 
+The **Random** button beside the prompt asks the selected provider/model for one drawing prompt and inserts it into the prompt box.
+
 ## Gallery
 
 The gallery page is available at `/gallery`. Add exported images to `public/gallery/` and commit them; when the Node server runs, `/api/gallery` scans that folder and the page displays the images.

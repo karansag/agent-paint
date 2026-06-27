@@ -106,6 +106,7 @@ function App() {
   const [customModel, setCustomModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [promptGenerating, setPromptGenerating] = useState(false);
   const [reference, setReference] = useState(null);
   const [referencePreview, setReferencePreview] = useState("");
   const [autoLoop, setAutoLoop] = useState(true);
@@ -342,6 +343,29 @@ function App() {
       setReference(null);
       setReferencePreview("");
       logEvent(error.message || String(error), "error");
+    }
+  }
+
+  async function generatePrompt() {
+    setPromptGenerating(true);
+    logEvent("generating prompt");
+
+    try {
+      const response = await fetch("/api/random-prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: getModelConfig() }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || `Prompt request returned ${response.status}`);
+      }
+      setPrompt(payload.prompt || "");
+      logEvent("prompt generated");
+    } catch (error) {
+      logEvent(error.message || String(error), "error");
+    } finally {
+      setPromptGenerating(false);
     }
   }
 
@@ -966,7 +990,12 @@ function App() {
 
           <section className="panel-section">
             <label className="field">
-              <span>Prompt</span>
+              <div className="field-heading">
+                <span>Prompt</span>
+                <button type="button" disabled={promptGenerating || ui.modelStreaming} onClick={generatePrompt}>
+                  {promptGenerating ? "Generating" : "Random"}
+                </button>
+              </div>
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
@@ -1019,7 +1048,6 @@ function App() {
               />
             </label>
           </section>
-
 
           <section className="panel-section log-section">
             <h2>Stream</h2>
@@ -1095,7 +1123,6 @@ function randomNonce() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-
 function clampNumber(value, min, max, fallback = min) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
@@ -1105,7 +1132,6 @@ function clampNumber(value, min, max, fallback = min) {
 function clampInt(value, min, max, fallback = min) {
   return Math.round(clampNumber(value, min, max, fallback));
 }
-
 
 function delay(ms) {
   return new Promise((resolve) => {

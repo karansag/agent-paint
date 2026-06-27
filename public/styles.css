@@ -255,6 +255,24 @@ canvas {
   margin-bottom: 8px;
 }
 
+.field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.field-heading span {
+  margin-bottom: 0;
+}
+
+.field-heading button {
+  min-height: 26px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
 .field input[type="text"],
 .field input[type="url"],
 .field input[type="password"],

@@ -62,6 +62,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.url === "/api/random-prompt" && req.method === "POST") {
+      let body = "";
+      for await (const chunk of req) body += chunk;
+      sendJson(res, await generateRandomPrompt(JSON.parse(body || "{}")));
+      return;
+    }
+
     if (req.url === "/api/models" && req.method === "POST") {
       let body = "";
       for await (const chunk of req) body += chunk;
@@ -235,6 +242,50 @@ async function listGalleryImages() {
     if (error.code === "ENOENT") return { images: [] };
     throw error;
   }
+}
+
+async function generateRandomPrompt(input) {
+  try {
+    const config = {
+      ...normalizeModelConfig(input.config),
+      maxTokens: 180,
+    };
+    const requestBody = buildChatCompletionRequest(config, [
+      {
+        role: "system",
+        content:
+          "Generate prompts for an autonomous canvas drawing agent. Return exactly one vivid drawing prompt, no markdown, no numbering, no explanation.",
+      },
+      {
+        role: "user",
+        content:
+          "Create one fairly random, visually specific prompt for a 768x512 canvas. Prefer an unusual subject, setting, composition, or visual constraint. Keep it to one sentence.",
+      },
+    ]);
+    let text = "";
+
+    await fetchAndConsumeModelStream({
+      config,
+      requestBody,
+      signal: AbortSignal.timeout(20000),
+      onContent: (content) => {
+        text += content;
+      },
+    });
+
+    return { prompt: cleanGeneratedPrompt(text) };
+  } catch (error) {
+    return { error: formatModelError(error) };
+  }
+}
+
+function cleanGeneratedPrompt(text) {
+  return (
+    cleanText(text, 400)
+      .replace(/^[-*\d.\s"'`]*(prompt\s*:\s*)?/i, "")
+      .replace(/["'`]+$/g, "")
+      .trim() || "Draw a strange, detailed scene with a clear focal point."
+  );
 }
 
 function sendJson(res, payload) {
