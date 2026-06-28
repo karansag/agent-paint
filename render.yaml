@@ -1,0 +1,19 @@
+# Render Blueprint: persistent Node web service with native WebSocket support.
+# Deploy: push this repo to GitHub, then in the Render dashboard pick
+# "New > Blueprint" and select the repo. Render reads this file, provisions
+# the service, and prompts for the secret env vars marked sync:false.
+services:
+  - type: web
+    name: agent-paint
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node server.js
+    healthCheckPath: /api/config
+    envVars:
+      # Default provider. Change to "anthropic" or "llama" if desired.
+      - key: LLM_PROVIDER
+        value: openai
+      # Secret: set this in the Render dashboard (Render will prompt for it).
+      - key: OPENAI_API_KEY
+        sync: false

@@ -1,37 +1,56 @@
 # Agent Paint
 
-MS Paint style canvas with an agent loop for any OpenAI-compatible chat API.
+An agent-driven canvas with a live drawing loop for any OpenAI-compatible chat API.
 
-The model draws by streaming **raw SVG**. Each complete element (`<path>`, `<circle>`, `<g>`, gradients, `<text>`, ...) is painted onto the canvas the moment its closing tag arrives, so the drawing builds up live. After each batch the browser can send a downscaled canvas screenshot and a compact visual summary back to the model, so the agent can continue or correct its work.
+The model draws by streaming **raw SVG**. Each complete element (`<path>`, `<circle>`, `<g>`, gradients, `<text>`, ...) is painted onto the canvas the moment its closing tag arrives, so the drawing builds up live. There are no manual paint tools; the canvas belongs to the model. After each batch the browser can send a downscaled canvas screenshot and a compact visual summary back to the model, so the agent can continue or correct its work.
 
-Giving the model SVG instead of a fixed set of paint primitives means it can draw anything it can describe — Bezier curves, gradients, transforms, opacity — and its own taste shows through. The system prompt tells the model who it is and explicitly asks for its own style.
+Giving the model SVG instead of a fixed set of paint primitives means it can draw anything it can describe (Bezier curves, gradients, transforms, opacity), and its own taste shows through. The system prompt tells the model who it is and explicitly asks for its own style.
+
+The frontend is a React app (`src/App.jsx`) bundled with esbuild into `public/app.js`. The backend is a plain Node HTTP + WebSocket server (`server.js`).
 
 ## Run
 
 ```bash
 npm install
-npm start       # http://localhost:5173
+npm start       # builds the frontend, then serves http://localhost:5173
+npm run dev     # same, with the server in --watch mode
 npm test        # unit tests for the SVG stream parser and provider config
 ```
 
-By default the backend probes local `llama-server` ports (`8081`, then `8080`) and uses the first healthy endpoint — so a local Gemma served by llama.cpp works with zero config.
+`npm start` runs the esbuild bundle step first, then `node server.js`. To rebuild the frontend alone, use `npm run build`.
+
+The default provider is **OpenAI** (`OPENAI_API_KEY` required). To use a local Gemma served by llama.cpp instead, set `LLM_PROVIDER=llama`; the backend then probes ports `8081` then `8080` and uses the first healthy endpoint.
 
 Environment overrides:
 
 ```bash
-LLM_PROVIDER=llama LLM_BASE_URL=http://127.0.0.1:8081 LLM_MODEL=gemma-4-26B-A4B-it-Q4_K_M.gguf npm start
-OPENAI_API_KEY=...    LLM_PROVIDER=openai npm start
+OPENAI_API_KEY=...    npm start                                   # default provider
 ANTHROPIC_API_KEY=... LLM_PROVIDER=anthropic npm start
+LLM_PROVIDER=llama LLM_BASE_URL=http://127.0.0.1:8081 LLM_MODEL=gemma-4-26B-A4B-it-Q4_K_M.gguf npm start
 ```
 
-Recognized variables: `PORT`, `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_CHAT_PATH`, `LLM_MAX_TOKENS`, and the per-provider key vars (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LLAMA_API_KEY`, or generic `LLM_API_KEY`). Everything can also be changed in the UI per request.
+A `.env` file in the project root is loaded automatically (via `node --env-file-if-exists`).
+
+Recognized variables: `PORT`, `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_MAX_TOKENS`, and the per-provider key vars (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LLAMA_API_KEY`, or generic `LLM_API_KEY`). Provider, base URL, model, and API key can also be changed in the UI per request.
+
+## Deploy
+
+The drawing loop runs over a WebSocket (`/agent`), so the app needs a host that keeps a Node process alive. Serverless platforms like Vercel that do not support persistent WebSocket servers will not run the drawing loop without a transport rewrite.
+
+A `render.yaml` blueprint is included for [Render](https://render.com), whose free tier supports WebSockets:
+
+1. Push this repo to GitHub.
+2. In Render, choose **New > Blueprint** and select the repo. Render reads `render.yaml`, builds with `npm install && npm run build`, and starts `node server.js`.
+3. Set `OPENAI_API_KEY` (and any other secrets) when Render prompts for it.
+
+Render injects `PORT`, which the server already reads. The same setup works on any persistent-process host (Railway, Fly.io, a VM); only the platform config differs. Note the Render free tier idles after inactivity and cold-starts on the next request.
 
 ## Providers
 
-- **Local llama.cpp** — `http://127.0.0.1:8081/v1/chat/completions`; vision support is probed via `/props`, model name via `/v1/models`
-- **OpenAI** — `https://api.openai.com/v1/chat/completions`
-- **Claude** — Anthropic's OpenAI-compatible endpoint, `https://api.anthropic.com/v1/chat/completions` (default model `claude-opus-4-8`)
-- **Custom OpenAI-compatible** — any base URL / path / model
+- **Local llama.cpp**: `http://127.0.0.1:8081/v1/chat/completions`; vision support is probed via `/props`, model name via `/v1/models`
+- **OpenAI**: `https://api.openai.com/v1/chat/completions`
+- **Claude**: Anthropic's OpenAI-compatible endpoint, `https://api.anthropic.com/v1/chat/completions` (default model `claude-opus-4-8`)
+- **Custom OpenAI-compatible**: any base URL and model (the chat path is fixed per provider and is not user-configurable)
 
 The model field is a dropdown populated live from the provider (`/v1/models` for llama.cpp/OpenAI/custom, the native models API for Anthropic), with a `Custom...` option for typing an arbitrary model id. The list refreshes when you change provider, base URL, or API key.
 
@@ -66,7 +85,7 @@ The **Random** button beside the prompt asks the selected provider/model for one
 
 ## Gallery
 
-The gallery page is available at `/gallery`. Add exported images to `public/gallery/` and commit them; when the Node server runs, `/api/gallery` scans that folder and the page displays the images. A matching sidecar JSON file with the same basename adds metadata:
+The top bar has **Draw** and **Gallery** tabs; the gallery page is also reachable directly at `/gallery`. Add exported images to `public/gallery/` and commit them; when the Node server runs, `/api/gallery` scans that folder and the page displays the images. A matching sidecar JSON file with the same basename adds metadata:
 
 ```json
 {
