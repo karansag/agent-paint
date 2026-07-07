@@ -14,6 +14,12 @@ services:
       # Default provider. Change to "anthropic" or "llama" if desired.
       - key: LLM_PROVIDER
         value: openai
+      # How visitors may use the server's API keys:
+      #   demo - shared key works, rate limited (DEMO_* vars tune the limits)
+      #   byok - visitors must paste their own key; leave the key vars unset
+      #   open - unlimited shared key; do NOT use on a public deploy
+      - key: KEY_MODE
+        value: demo
       # Secret: set this in the Render dashboard (Render will prompt for it).
       - key: OPENAI_API_KEY
         sync: false

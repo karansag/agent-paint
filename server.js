@@ -15,13 +15,13 @@ import {
   normalizeModelList,
   curateModelList,
   findRejectedSamplingParam,
-  getProviderApiKey,
 } from "./lib/providers.js";
 import {
   createSvgElementExtractor,
   parseBatchElement,
   screenSvgElement,
 } from "./lib/svg-stream.js";
+import { normalizeKeyMode, createKeyPolicy, createDemoLimiter, clientIp } from "./lib/access.js";
 import { clampNumber, clampInt, optionalNumber, optionalInt, truncate } from "./lib/util.js";
 
 const ROOT_DIR = fileURLToPath(new URL(".", import.meta.url));
@@ -35,6 +35,14 @@ const ENV_MODEL = process.env.LLM_MODEL || "";
 const DEFAULT_MAX_TOKENS = clampInt(process.env.LLM_MAX_TOKENS, 256, 16384, 2000);
 
 const STARTUP = await resolveStartupConfig();
+
+const KEY_MODE = normalizeKeyMode(process.env.KEY_MODE);
+const keyPolicy = createKeyPolicy({ keyMode: KEY_MODE, startup: STARTUP });
+const DEMO_MAX_TOKENS = clampInt(process.env.DEMO_MAX_TOKENS, 256, 16384, 2000);
+const demoLimiter = createDemoLimiter({
+  turnsPerIpPerHour: clampInt(process.env.DEMO_TURNS_PER_HOUR, 1, 100000, 20),
+  turnsPerDay: clampInt(process.env.DEMO_TURNS_PER_DAY, 1, 1000000, 400),
+});
 
 const MIME_TYPES = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -65,7 +73,7 @@ const server = http.createServer(async (req, res) => {
     if (req.url === "/api/random-prompt" && req.method === "POST") {
       let body = "";
       for await (const chunk of req) body += chunk;
-      sendJson(res, await generateRandomPrompt(JSON.parse(body || "{}")));
+      sendJson(res, await generateRandomPrompt(JSON.parse(body || "{}"), clientIp(req)));
       return;
     }
 
@@ -92,8 +100,9 @@ const server = http.createServer(async (req, res) => {
 
 const wss = new WebSocketServer({ server, path: "/agent" });
 
-wss.on("connection", async (ws) => {
+wss.on("connection", async (ws, req) => {
   const session = {
+    ip: clientIp(req),
     running: false,
     abortController: null,
     width: 768,
@@ -155,12 +164,14 @@ async function buildClientConfig() {
     apiBaseUrl: STARTUP.apiBaseUrl,
     model: STARTUP.model,
     visionSupported,
+    keyMode: KEY_MODE,
     providers: Object.entries(PROVIDER_DEFINITIONS).map(([id, definition]) => ({
       id,
       label: definition.label,
       apiBaseUrl: id === STARTUP.provider ? STARTUP.apiBaseUrl : definition.defaultBaseUrl,
       model: id === STARTUP.provider ? STARTUP.model : definition.defaultModel,
       needsApiKey: definition.needsApiKey,
+      serverKey: keyPolicy.serverKeyAvailable(id),
       visionDefault:
         id === STARTUP.provider ? visionSupported : definition.visionStrategy === "assume",
     })),
@@ -178,7 +189,7 @@ async function listProviderModels(input) {
       input.apiBaseUrl || definition.defaultBaseUrl,
       definition.defaultBaseUrl,
     );
-    const apiKey = String(input.apiKey || getProviderApiKey(provider) || "").trim();
+    const apiKey = String(input.apiKey || "").trim() || keyPolicy.serverKeyFor(provider, baseUrl);
     const url = buildModelsEndpoint(baseUrl) + (provider === "anthropic" ? "?limit=100" : "");
     const headers =
       provider === "anthropic"
@@ -267,12 +278,14 @@ async function readGalleryMetadata(imageName) {
   }
 }
 
-async function generateRandomPrompt(input) {
+async function generateRandomPrompt(input, ip) {
   try {
     const config = {
       ...normalizeModelConfig(input.config),
       maxTokens: 180,
     };
+    const gate = gateModelRequest(config, ip);
+    if (!gate.ok) return { error: gate.message };
     const requestBody = buildChatCompletionRequest(config, [
       {
         role: "system",
@@ -351,6 +364,42 @@ This canvas is yours. Draw in your own voice: your sense of composition, palette
 When the request is an edit, preserve what is already on the canvas and integrate your additions with it instead of covering it. When the canvas is blank and the user gave no prompt, choose your subject freely.`;
 }
 
+// Every model call funnels through here: refuse requests that need a key but
+// have none, and rate limit + clamp turns that spend the server's key in demo
+// mode. Mutates config.maxTokens when clamping.
+function gateModelRequest(config, ip) {
+  if (!config.apiKey && getProviderDefinition(config.provider).needsApiKey) {
+    return { ok: false, message: missingKeyMessage(config) };
+  }
+
+  if (config.usesServerKey && KEY_MODE === "demo") {
+    config.maxTokens = Math.min(config.maxTokens, DEMO_MAX_TOKENS);
+    const result = demoLimiter.take(ip);
+    if (!result.ok) {
+      return {
+        ok: false,
+        message:
+          result.reason === "ip"
+            ? "Demo limit reached: the shared key allows a few turns per hour per visitor. Paste your own API key to keep going without limits."
+            : "The shared demo key has used up its daily budget. Paste your own API key to keep going.",
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
+function missingKeyMessage(config) {
+  const label = config.providerLabel;
+  if (KEY_MODE === "byok") {
+    return `${label} needs an API key, and this server runs in bring-your-own-key mode. Paste your ${label} key in the API key field; it is only forwarded to ${label}.`;
+  }
+  if (keyPolicy.serverKeyAvailable(config.provider)) {
+    return `The server's ${label} key is only used with the default ${label} endpoint. Paste your own key to use a custom base URL.`;
+  }
+  return `${label} needs an API key and this server has none configured. Paste your ${label} key in the API key field.`;
+}
+
 async function runModelTurn(ws, session, payload) {
   if (session.running) {
     send(ws, "error", { message: "The model is already producing a drawing batch." });
@@ -366,6 +415,14 @@ async function runModelTurn(ws, session, payload) {
     config = normalizeModelConfig(payload.config);
   } catch (error) {
     send(ws, "error", { message: formatModelError(error) });
+    session.running = false;
+    session.abortController = null;
+    return;
+  }
+
+  const gate = gateModelRequest(config, session.ip);
+  if (!gate.ok) {
+    send(ws, "error", { message: gate.message });
     session.running = false;
     session.abortController = null;
     return;
@@ -557,6 +614,8 @@ function normalizeModelConfig(input = {}) {
     rawBaseUrl || definition.defaultBaseUrl,
     definition.defaultBaseUrl,
   );
+  const clientKey = String(input.apiKey || "").trim();
+  const apiKey = clientKey || keyPolicy.serverKeyFor(provider, baseUrl);
   return {
     provider,
     providerLabel: definition.label,
@@ -565,7 +624,8 @@ function normalizeModelConfig(input = {}) {
     baseUrl,
     endpoint: buildChatEndpoint(baseUrl, definition.defaultChatPath),
     model: String(input.model || definition.defaultModel || STARTUP.model).trim() || STARTUP.model,
-    apiKey: String(input.apiKey || getProviderApiKey(provider) || "").trim(),
+    apiKey,
+    usesServerKey: Boolean(!clientKey && apiKey),
     temperature: clampNumber(
       input.temperature,
       0,

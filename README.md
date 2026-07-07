@@ -14,7 +14,7 @@ The frontend is a React app (`src/App.jsx`) bundled with esbuild into `public/ap
 npm install
 npm start       # builds the frontend, then serves http://localhost:5173
 npm run dev     # same, with the server in --watch mode
-npm test        # unit tests for the SVG stream parser and provider config
+npm test        # unit tests for the SVG parser, provider config, and key policy
 ```
 
 `npm start` runs the esbuild bundle step first, then `node server.js`. To rebuild the frontend alone, use `npm run build`.
@@ -31,7 +31,17 @@ LLM_PROVIDER=llama LLM_BASE_URL=http://127.0.0.1:8081 LLM_MODEL=gemma-4-26B-A4B-
 
 A `.env` file in the project root is loaded automatically (via `node --env-file-if-exists`).
 
-Recognized variables: `PORT`, `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_MAX_TOKENS`, and the per-provider key vars (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LLAMA_API_KEY`, or generic `LLM_API_KEY`). Provider, base URL, model, and API key can also be changed in the UI per request.
+Recognized variables: `PORT`, `LLM_PROVIDER`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_MAX_TOKENS`, `KEY_MODE` plus the `DEMO_*` limits (see below), and the per-provider key vars (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LLAMA_API_KEY`, or generic `LLM_API_KEY`). Provider, base URL, model, and API key can also be changed in the UI per request.
+
+## Key sharing and rate limits
+
+`KEY_MODE` controls whether visitors may spend the API keys in the server's environment:
+
+- `open` (default) — env keys fill in whenever the browser omits one, with no limits. For local use.
+- `demo` — env keys work, but model turns that use them are rate limited: `DEMO_TURNS_PER_HOUR` per visitor IP (default 20), `DEMO_TURNS_PER_DAY` total (default 400), and `max_tokens` clamped to `DEMO_MAX_TOKENS` (default 2000). Visitors who paste their own key are not limited.
+- `byok` — bring your own key: env keys are never used for visitor requests.
+
+In every mode, a server key is only attached when the request targets that provider's own endpoint (or the operator's configured `LLM_BASE_URL`). A base URL typed into the UI never receives a server key, so a visitor cannot redirect one to a host they control.
 
 ## Deploy
 
@@ -42,6 +52,8 @@ A `render.yaml` blueprint is included for [Render](https://render.com), whose fr
 1. Push this repo to GitHub.
 2. In Render, choose **New > Blueprint** and select the repo. Render reads `render.yaml`, builds with `npm install && npm run build`, and starts `node server.js`.
 3. Set `OPENAI_API_KEY` (and any other secrets) when Render prompts for it.
+
+The blueprint sets `KEY_MODE=demo`, so visitors can try the shared key within the rate limits and paste their own key for unlimited use. For a zero-cost deploy, set `KEY_MODE=byok` and skip the key secrets entirely.
 
 Render injects `PORT`, which the server already reads. The same setup works on any persistent-process host (Railway, Fly.io, a VM); only the platform config differs. Note the Render free tier idles after inactivity and cold-starts on the next request.
 

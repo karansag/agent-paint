@@ -105,6 +105,7 @@ function App() {
   const [selectedModel, setSelectedModel] = useState("gpt-4.1-mini");
   const [customModel, setCustomModel] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [keyMode, setKeyMode] = useState("open");
   const [prompt, setPrompt] = useState("");
   const [promptGenerating, setPromptGenerating] = useState(false);
   const [reference, setReference] = useState(null);
@@ -134,6 +135,13 @@ function App() {
 
   const currentModel = selectedModel === CUSTOM_MODEL_OPTION ? customModel.trim() : selectedModel;
   const currentDefaults = providerDefaultsRef.current.get(provider) || {};
+  const keyPlaceholder = currentDefaults.serverKey
+    ? keyMode === "demo"
+      ? "Blank uses the shared demo key (rate limited)"
+      : "Uses the server's key if blank"
+    : currentDefaults.needsApiKey
+      ? "Required: paste your API key"
+      : "Optional for local endpoints";
 
   formRef.current = {
     provider,
@@ -218,6 +226,7 @@ function App() {
 
     setProvider(nextProvider);
     setApiBaseUrl(nextBaseUrl);
+    if (config.keyMode) setKeyMode(config.keyMode);
     applyVisionSupported(Boolean(config.visionSupported));
     setModelSelection([], nextModel);
     refreshModelList({
@@ -683,6 +692,7 @@ function App() {
 
     if (message.type === "hello") {
       if (message.providers) setProviderList(message.providers);
+      if (message.keyMode) setKeyMode(message.keyMode);
       applyVisionSupported(Boolean(message.visionSupported));
       return;
     }
@@ -1007,7 +1017,7 @@ function App() {
                 type="password"
                 spellCheck="false"
                 autoComplete="off"
-                placeholder={currentDefaults.needsApiKey ? "Uses provider env var if blank" : "Optional for local endpoints"}
+                placeholder={keyPlaceholder}
               />
             </label>
           </section>
